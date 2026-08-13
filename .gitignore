@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# 数据与模型文件
+*.pkl
+*.joblib
+*.onnx
+*.h5
+*.pt
+*.ckpt
+data/
+*.db
+*.sqlite
+
+# FAISS 索引与实体元数据（大文件，从 Neo4j 重建）
+_003_create_neo4j_database/entities.index
+_003_create_neo4j_database/entities.json
+
+# 爬虫 cookie 与中间产物
+cookie/*
+!cookie/.gitkeep
+*.log
+
+# 系统文件
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.lnk

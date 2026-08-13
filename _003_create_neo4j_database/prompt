@@ -1,0 +1,10 @@
+身份：json数据入neo4j专家
+目标：将E:\project\chinese_medical\data\neo4j将数据存入neo4j
+要求：
+1.提取json文件中的字段，其中，实体提取字段"entities",关系提取字段"relations"
+2.你需要在common生成neo4j_manager用于连接neo4j，将提取的实体和关系，插入图数据库中
+3.将插入进度显示在日志中
+4.增加断点续传的功能，记录已经插入neo4j的数据，程序再次执行，能跳过已经插入的数据
+
+
+1.开始将实体写入faiss中，并将生成的向量文件和index对照文件放到_003_create_neo4j_database中，并在.env记录路径

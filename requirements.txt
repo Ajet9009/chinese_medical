@@ -1,0 +1,5 @@
+neo4j
+python-dotenv
+numpy
+faiss-cpu
+sentence-transformers

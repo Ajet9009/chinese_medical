@@ -1,0 +1,77 @@
+重新设计中医意图识别节点。上次的设计意图识别提示词过于简单。我将遵循 why、how的原则给你提供信息以及限制你的行为。
+【why】识别用户问题的中医方向意图才进行问题抽取实体，将这个实体使用bge匹配标准实体，使用标准实体生成cyper语句
+【how】提示词中应该包含知识图谱实体的信息，意图识别出来后将state的is_zhongyi_intent修改为ture即可
+
+实现大模型直接回答节点。
+【why】当意图识别出来不属于中医问题使用该节点直接进行回答。
+【how】
+    你是一名专业的中医知识助手，回答时请尽量基于中医理论和术语来解释。
+    要求：
+    - 优先从中医角度（如症状、方剂、中药材、功效、经络、辨证论治、典籍等）进行回答。
+    - 如果问题与中医无关，请直接给出简洁的常规回答，不要强行套用中医。
+    - 回答要准确、简洁，避免无关内容。
+    - 输出时只给出最终答案，不要解释你是如何推理的。
+
+并编写测试方法，让我显示观察
+
+实现实体抽取节点。
+【why】用于承接中医相关意图的下游节点，从用户的问题中抽取与中医相关的实体内容。
+【how】
+    例如，“肚子疼吃什么药”->"肚子疼"，"有什么药汤可以治疗气虚，" -> "气虚"，"药汤"，
+【what】不要抽取与中医无关的实体，
+并在节点类编写main测试方法，让我显示观察
+
+
+ 从以下用户输入中抽取六类实体：
+    1. Symptom（症状），如咳嗽、腹痛等
+    2. Disease（疾病），如感冒、肺炎、肾虚等
+    3. Formula（方剂），如四君子汤、桂枝汤等
+    4. Herb（药材），如人参、黄芪、丁香等
+    5. Effect（功效），如补气、活血、祛湿、止痛等
+    6. Source（出处），如《本草纲目》《伤寒论》等
+    要求：
+    - 只输出严格的 JSON 格式
+    - JSON 格式如下：
+    {{
+        "symptoms": ["..."],
+        "diseases": ["..."],
+        "formulas": ["..."],
+        "herbs": ["..."],
+        "effects": ["..."],
+        "sources": ["..."]
+    }}
+    - 如果某类实体不存在，请返回空列表 []
+    然后将这些实体存储到state中，命名为，user_input_symptoms，user_input_diseases...
+
+
+1. 角色(Role)：你现在是向量相似度检索领域资深专家
+2. 背景(Context)：实现实体标准化节点，用于承接中医【实体抽取节点】的下游节点
+3. 任务指令(Instruction)：
+    需要将state里的user_input_symptoms，user_input_diseases...进行通过faiss库使用”EMBEDDING_MODEL_PATH=E:/GG/7月30日-知识图谱项目/05_扩展/模型权重/bge-large-zh-v1.5“向量匹配标准化后存储到state里，以matched_symptoms...命名
+4. 输入数据(Input)：state里的user_input_symptoms，user_input_diseases
+5. 输出要求(Output‑format)：state.matched_symptoms,只匹配top3且分数设置动态阈值，骤降分数去除，分数小于0.6去除。
+
+1. 角色(Role)：你现在是向量相似度检索领域资深专家
+2. 背景(Context)：实现实体标准化节点，用于承接中医【实体抽取节点】的下游节点
+3. 任务指令(Instruction)：
+    需要将state里的user_input_symptoms，user_input_diseases...进行通过faiss库使用”EMBEDDING_MODEL_PATH=E:/GG/7月30日-知识图谱项目/05_扩展/模型权重/bge-large-zh-v1.5“向量匹配标准化后存储到state里，以matched_symptoms...命名
+4. 输入数据(Input)：state里的user_input_symptoms，user_input_diseases
+5. 输出要求(Output‑format)：state.matched_symptoms,只匹配top3且分数设置动态阈值，骤降分数去除，分数小于0.6去除。
+
+
+1. 角色(Role)：cypher语句生成助手
+2. 背景(Context)：标准实体无法概括所有关系，需要根据标准实体通过图数据库寻找所有的关系实体。
+3. 任务指令(Instruction)：根据state.matched_symptoms,state.matched_diseases...和【neo4j.mate_data(通过调用 neo4j = Neo4jManager() res = neo4j.get_schema_metadata()) 实时获取】，生成1-N条cypher语句
+4. 通过调用 neo4j.validate_cypher()检查编写cypher语法正确性,这个函数会返回cypher语法的错误，需要根据错误进行重调cypher,每条cypher最多检查三次，每条最少检查一次，最终保留正确的
+5. 输出要求(Output‑format)：使用state.cypher_query存储生成的cypher,要求llm生成的必须是json格式可以正确放置到state.cypher_query数组中
+7. 约束与负面提示(Negative Prompt)：生成内容不得包含任何解释过程，和影响cypher执行的中文
+
+1. 角色(Role)：cypher执行助手
+2. 背景(Context)：仅有cypher无法获取内容，需要根据cypher通过图数据库执行得到结果。
+3. 任务指令(Instruction)：生成run_cypher_node节点，使用Neo4jManager的execute_cypher_batch执行cypher获取结果填充到state.neo4j_answer，将结果拼接到提示词中，提升回答的准确性，完善整个graph
+5. 输出要求(Output‑format)：将neo4j_answer去重，去空格，保证上下文完整且精简，
+
+
+
+
+
