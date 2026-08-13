@@ -1,0 +1,228 @@
+# 草本通 — 中医药知识图谱问答系统
+
+基于 **Neo4j 知识图谱 + LangGraph + 大语言模型** 的中医药智能问答系统。
+
+将非结构化中医药文本（古籍、教材、百科）转化为结构化知识图谱，结合 LLM 实现自然语言问答，覆盖方剂、药材、症状、疾病、功效、经络、典籍等领域。
+
+---
+
+## ✨ 核心能力
+
+- **意图识别**：LLM 判断问题是否属于中医领域，自动路由
+- **实体抽取**：从自然语言问题中抽取六类中医实体（症状/疾病/方剂/药材/功效/出处）
+- **向量匹配**：FAISS + BGE-large-zh-v1.5 将口语化实体匹配到知识图谱标准实体
+- **Cypher 生成**：LLM 结合图 schema 生成查询语句，EXPLAIN 校验 + 错误自动修正
+- **知识问答**：图查询结果 → LLM 生成自然语言回答
+- **全链路追踪**：Langfuse 记录每次请求的 Trace/Span/Generation，含 token 用量、成本、TTFT
+
+---
+
+## 🏗️ 架构
+
+```
+用户问题
+  │
+  ▼
+intent_recognition (LLM) ──→ 是否中医问题？
+  │                              │
+  │ 否                           │ 是
+  ▼                              ▼
+general_response (LLM)    entity_extraction (LLM)
+  直接回答                  抽取六类实体
+  │                              │
+  ▼                              ▼
+END                       entity_normalization (FAISS+BGE)
+                          向量匹配标准实体
+                              │
+                              ▼
+                          cypher_generation (LLM)
+                          生成 Cypher + EXPLAIN 校验修正
+                              │
+                              ▼
+                          cypher_executor (Neo4j)
+                          执行查询，结果去重去噪
+                              │
+                              ▼
+                          answer_generation (LLM)
+                          结合图谱结果生成回答
+                              │
+                              ▼
+                             END
+```
+
+---
+
+## 🛠️ 技术栈
+
+| 层 | 技术 |
+|----|------|
+| 图数据库 | Neo4j 4.4 |
+| 向量检索 | FAISS + sentence-transformers (BGE-large-zh-v1.5) |
+| 大模型 | DeepSeek (OpenAI 兼容接口) |
+| 编排框架 | LangGraph 1.x + LangChain 1.x |
+| API 服务 | FastAPI + Uvicorn（SSE 流式） |
+| 前端 | Streamlit |
+| 可观测性 | Langfuse（自托管） |
+| 微调模型 | vllm + LoRA (Qwen2.5-1.5B) |
+
+---
+
+## 📁 目录结构
+
+```
+_000_demo/                  验证脚本（API 调用、Streamlit 旧版）
+_001_crawler/               数据爬取（中药/方剂索引 + 详情页）
+_002_extract_information/   知识抽取（LLM 实体关系抽取 + 规则层合并）
+_003_create_neo4j_database/ Neo4j 入库 + FAISS 索引构建
+_004_langgraph_more_nodes/  LangGraph 图节点（核心）
+├── state.py                  GraphState 定义 + KG 实体/关系常量
+├── graph.py                  图编排（7 节点 + 条件路由）
+├── intent_recognition.py     节点1: 意图识别
+├── entity_extraction.py      节点2: 六类实体抽取
+├── entity_normalization.py   节点3: FAISS+BGE 向量匹配
+├── cypher_generation.py      节点4: Cypher 生成 + 校验修正
+├── cypher_executor.py        节点5: 图查询执行
+├── answer_generation.py      节点6: 最终回答
+└── general_response.py       节点7: 非中医问题回答
+_005_fastapi/               FastAPI 服务（/ask + /ask/stream）
+_006_streamlit/             Streamlit 前端
+_007_fine_tune/             vllm 微调模型客户端（LoRA 多适配器）
+common/                     公共模块
+├── neo4j_manager.py          Neo4j 连接/导入/校验/执行/元数据
+├── faiss_vector_store.py     FAISS 向量存储
+├── langfuse_manager.py       Langfuse 客户端（追踪/采样/成本）
+├── sanitizer.py              PII 脱敏
+└── export_neo4j_metadata.py  导出图 schema
+tests/                      单元测试
+```
+
+---
+
+## 🚀 快速开始
+
+### 环境要求
+
+- Python 3.10+
+- Neo4j 4.4（本地 7687 端口）
+- Docker（用于 Langfuse 等基础设施）
+
+### 第 1 步：启动 Docker 基础设施
+
+```bash
+cd E:\devapp\milvus_data
+docker compose up -d    # Langfuse、Milvus、MySQL 等
+```
+
+### 第 2 步：启动 Neo4j
+
+```bash
+cd E:\devapp\neo4j-community-4.4.41\bin
+neo4j.bat console        # 或 neo4j.bat start
+```
+
+### 第 3 步：配置环境变量
+
+复制 `common/.env` 并填写：
+
+```bash
+# 大模型
+MODEL_API_KEY=sk-xxx
+MODEL_BASE_URL=https://api.deepseek.com
+MODEL_NAME=deepseek-v4-flash
+
+# Neo4j
+NEO4J_URI=bolt://localhost:7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=xxx
+
+# 向量检索
+EMBEDDING_MODEL_PATH=path/to/bge-large-zh-v1.5
+FAISS_INDEX_PATH=path/to/entities.index
+FAISS_METADATA_PATH=path/to/entities.json
+
+# Langfuse（可观测性）
+LANGFUSE_SECRET_KEY=sk-lf-xxx
+LANGFUSE_PUBLIC_KEY=pk-lf-xxx
+LANGFUSE_HOST=http://localhost:3000
+LANGFUSE_ENABLED=true
+LANGFUSE_SAMPLE_RATE=1.0
+```
+
+### 第 4 步：安装依赖
+
+```bash
+pip install neo4j python-dotenv numpy faiss-cpu sentence-transformers \
+            langchain langchain-openai langgraph fastapi uvicorn \
+            streamlit langfuse pydantic
+```
+
+### 第 5 步：启动服务
+
+```bash
+# 终端 1：API 服务（端口 8000）
+python -m _005_fastapi.main
+
+# 终端 2：Streamlit 前端（端口 8501）
+python _006_streamlit/run.py
+```
+
+访问：
+- 前端：http://localhost:8501
+- API 文档：http://localhost:8000/docs
+- Langfuse：http://localhost:3000
+
+---
+
+## 📡 API 接口
+
+### POST /ask
+
+```bash
+curl -X POST http://localhost:8000/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question": "四君子汤有什么功效？"}'
+```
+
+返回完整结构（意图、实体、匹配、Cypher、回答）。
+
+### POST /ask/stream（SSE 流式）
+
+```bash
+curl -X POST http://localhost:8000/ask/stream \
+  -H "Content-Type: application/json" \
+  -d '{"question": "四君子汤有什么功效？"}'
+```
+
+逐节点推送进度（`event: progress`），最终 `event: done` 返回完整结果。
+
+---
+
+## 📊 可观测性（Langfuse）
+
+- **Trace**：一次 API 请求一条，含 request_id/session_id
+- **Span**：7 个图节点各一个，记录执行顺序 + 耗时
+- **Generation**：每次 LLM 调用，含模型名、token 用量、成本、TTFT
+- **Prompt 管理**：5 个提示词在 Langfuse UI 集中管理，改后 60s 自动生效
+- **成本核算**：按 token 自动计算成本（输入 1元/1M，输出 3元/1M）
+
+---
+
+## 🧪 测试
+
+```bash
+# Langfuse 集成测试
+pytest tests/test_langfuse_integration.py -v
+
+# 单节点测试（每个文件有 main()）
+python -m _004_langgraph_more_nodes.intent_recognition
+python -m _004_langgraph_more_nodes.cypher_generation
+
+# API 调用验证
+python _000_demo/demo_api.py "四君子汤有什么功效？"
+```
+
+---
+
+## 📝 License
+
+MIT
