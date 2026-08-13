@@ -75,6 +75,12 @@ class _TraceCallbackHandler:
         self._start_times: dict[str, float] = {}
         self._first_token_times: dict[str, float] = {}
 
+    @property
+    def trace_id(self) -> str:
+        """暴露 trace_id，供外部评分关联。"""
+        return self._trace_id
+        self._first_token_times: dict[str, float] = {}
+
     # ── 节点 Span（由 main.py 通过 astream_events 的 event['name'] 驱动）──
 
     def start_node_span(self, name: str, input: Any = None) -> None:
@@ -278,36 +284,45 @@ class LangfuseManager:
             return 0.1
 
     def _should_sample(self) -> bool:
-        if self._sample_rate >= 1.0:
-            return True
-        if self._sample_rate <= 0.0:
-            return False
-        return random.random() < self._sample_rate
+        return self.should_sample()
 
     # ------------------------------------------------------------
     # 公共 API
     # ------------------------------------------------------------
 
     def is_enabled(self) -> bool:
-        """全局启用 + 客户端可用 + 命中采样。"""
+        """全局启用 + 客户端可用（不含采样判断）。"""
         if not self._enabled:
             return False
         if self._client is None:
             return False
-        return self._should_sample()
+        return True
+
+    def should_sample(self) -> bool:
+        """固定概率采样判断（正常请求）。"""
+        if self._sample_rate >= 1.0:
+            return True
+        if self._sample_rate <= 0.0:
+            return False
+        return random.random() < self._sample_rate
 
     def create_handler(
         self,
         trace_name: str = "POST:/ask",
         metadata: dict[str, Any] | None = None,
         tags: list[str] | None = None,
+        force: bool = False,
     ) -> Any | None:
         """创建 Langfuse 自定义 CallbackHandler（兼容 langchain v1.x）。
 
+        Args:
+            force: True 跳过采样，强制创建（用于异常/重试/低分场景）。
+
         自动创建 trace 并注入 metadata/tags。若未启用返回 None。
-        不依赖 langfuse.callback.langchain（与 langchain v1.x 不兼容）。
         """
         if not self.is_enabled() or self._client is None:
+            return None
+        if not force and not self.should_sample():
             return None
 
         try:
@@ -332,15 +347,65 @@ class LangfuseManager:
             )
 
             logger.info(
-                "Langfuse trace 已创建 name=%s request_id=%s",
+                "Langfuse trace 已创建 name=%s request_id=%s force=%s",
                 trace_name,
                 meta.get("request_id", "?"),
+                force,
             )
             return handler
 
         except Exception as exc:
             logger.warning("创建 Langfuse handler 失败: %s", exc)
             return None
+
+    def record_summary_span(
+        self,
+        trace_name: str,
+        metadata: dict[str, Any] | None,
+        summary: dict[str, Any],
+    ) -> None:
+        """强制采样：记录异常/重试/低分的摘要 trace。
+
+        即使未命中采样也强制记录，只包含一个摘要 span（不重跑图）。
+        """
+        if not self.is_enabled() or self._client is None:
+            return
+        try:
+            meta = dict(metadata or {})
+            meta.setdefault("request_id", str(uuid.uuid4()))
+            meta.setdefault("session_id", str(uuid.uuid4()))
+            meta.setdefault("service_version", os.getenv("SERVICE_VERSION", "1.0.0"))
+            meta["sampling"] = "forced"
+
+            trace = self._client.trace(
+                name=trace_name,
+                metadata=meta,
+                tags=["tcm-qa", "forced-sampling"],
+            )
+            span = trace.span(
+                name="summary",
+                output=self._sanitize_summary(summary),
+            )
+            span.end()  # 必须 end，span 才会结束并上报
+            logger.info(
+                "[Langfuse] 强制采样摘要 trace name=%s reason=%s",
+                trace_name,
+                summary.get("reason", "unknown"),
+            )
+        except Exception as exc:
+            logger.warning("[Langfuse] 记录摘要 trace 失败: %s", exc)
+
+    @staticmethod
+    def _sanitize_summary(summary: dict[str, Any]) -> dict[str, Any]:
+        """摘要脱敏 + 截断，避免过长。"""
+        from common.sanitizer import sanitize
+        clean: dict[str, Any] = {}
+        for k, v in summary.items():
+            if isinstance(v, str):
+                clean[k] = sanitize(v[:2000])
+            else:
+                clean[k] = v
+        return clean
 
     def flush(self, timeout: float = 5.0) -> None:
         """刷新 Langfuse 缓冲区，确保数据上报完成。超时 5 秒。"""

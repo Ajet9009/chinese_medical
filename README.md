@@ -13,7 +13,9 @@
 - **向量匹配**：FAISS + BGE-large-zh-v1.5 将口语化实体匹配到知识图谱标准实体
 - **Cypher 生成**：LLM 结合图 schema 生成查询语句，EXPLAIN 校验 + 错误自动修正
 - **知识问答**：图查询结果 → LLM 生成自然语言回答
+- **记忆系统**：分层记忆（短期 Redis + 长期向量库 + 用户画像），多轮对话上下文 + 用户偏好个性化
 - **全链路追踪**：Langfuse 记录每次请求的 Trace/Span/Generation，含 token 用量、成本、TTFT
+- **数据飞轮**：自动评分 + Bad Case 回流 + 回归实验，实现数据驱动的持续优化闭环
 
 ---
 
@@ -87,10 +89,15 @@ _004_langgraph_more_nodes/  LangGraph 图节点（核心）
 _005_fastapi/               FastAPI 服务（/ask + /ask/stream）
 _006_streamlit/             Streamlit 前端
 _007_fine_tune/             vllm 微调模型客户端（LoRA 多适配器）
+_008_memory/                Agent 记忆系统
+├── memory_manager.py          MemoryManager 主类（读写 + 三元组 + Token 预算）
+├── stores.py                  分层存储抽象（Redis/向量库/画像）
+└── factory.py                 工厂（注入依赖 + 降级 + 单例）
 common/                     公共模块
 ├── neo4j_manager.py          Neo4j 连接/导入/校验/执行/元数据
 ├── faiss_vector_store.py     FAISS 向量存储
 ├── langfuse_manager.py       Langfuse 客户端（追踪/采样/成本）
+├── eval_manager.py           评估闭环（评分/数据集/实验）
 ├── sanitizer.py              PII 脱敏
 └── export_neo4j_metadata.py  导出图 schema
 tests/                      单元测试
@@ -194,6 +201,48 @@ curl -X POST http://localhost:8000/ask/stream \
 ```
 
 逐节点推送进度（`event: progress`），最终 `event: done` 返回完整结果。
+
+### 身份头（记忆隔离）
+
+前端每次打开页面生成独立 `user_id`，通过请求头传递：
+
+```
+X-User-ID: <随机 UUID>     # 用户级隔离（长期记忆/画像）
+X-Session-ID: <随机 UUID>  # 会话级隔离（短期对话）
+```
+
+---
+
+## 🧠 记忆系统
+
+三层分层存储：
+
+| 层 | 存储 | 用途 | 实现 |
+|----|------|------|------|
+| 短期记忆 | Redis | 会话内最近 N 轮对话（滑动窗口）| `RedisShortTermStore` |
+| 长期记忆 | JSON 向量库 | 用户关键事实三元组（语义检索）| `JsonLongTermStore` |
+| 用户画像 | 字典（可换 Postgres）| 结构化偏好 | `DictProfileStore` |
+
+**企业级特性**：
+- **Token 预算**：超 4k 阈值触发 LLM 摘要压缩（不直接截断）
+- **信息冲突/遗忘**：三元组 `subject+predicate` 唯一，新值覆盖旧值，否定删除
+- **防幻觉**：每条记忆带 `source` + `timestamp`，按 `user_id` 隔离
+- **依赖降级**：Redis/LLM/Embedding 失败不阻塞主流程
+
+---
+
+## 📊 评估闭环（数据飞轮）
+
+```
+生产 Trace → 自动评分（cypher_success/retry_count/answer_nonempty）
+   → Bad Case（强制采样）→ 构建数据集 → 回归实验 → 优化 Prompt/模型
+```
+
+- **自动评分**：请求结束自动打分
+- **动态采样**：正常 10%，异常/重试/低分/慢请求 100% 强制记录
+- **数据回流**：`python common/build_eval_dataset.py` 拉 Bad Case 建数据集
+- **回归实验**：`python common/run_experiment.py` 数据集跑分对比
+- **用户反馈**：前端 👍/👎 回传 `user_feedback` score
 
 ---
 

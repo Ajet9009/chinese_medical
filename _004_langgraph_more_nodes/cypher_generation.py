@@ -160,19 +160,24 @@ def _parse_cypher_array(raw_text: str) -> list[str]:
     return []
 
 
-def _validate_and_fix(llm, cypher: str, schema_meta: dict) -> str | None:
-    """EXPLAIN 校验 + 错误修正，最多 MAX_RETRIES 次。返回有效 Cypher 或 None。"""
+def _validate_and_fix(llm, cypher: str, schema_meta: dict) -> tuple[str | None, int]:
+    """EXPLAIN 校验 + 错误修正，最多 MAX_RETRIES 次。
+
+    Returns: (有效 Cypher 或 None, 重试次数)。
+    """
     from common.neo4j_manager import Neo4jManager
 
+    retry_count = 0
     mgr = Neo4jManager()
     try:
         for attempt in range(MAX_RETRIES):
             result = mgr.validate_cypher(cypher)
             if result["valid"]:
-                return cypher  # 通过
+                return cypher, retry_count  # 通过
             if attempt == MAX_RETRIES - 1:
                 break  # 最后一次失败
             # 喂错误给 LLM 修正
+            retry_count += 1
             fix_prompt = f"""以下 Cypher 执行 EXPLAIN 时报错，请修正。
 
 ## 图 Schema
@@ -196,7 +201,7 @@ def _validate_and_fix(llm, cypher: str, schema_meta: dict) -> str | None:
                     cypher = cypher[6:].strip()
             except Exception:
                 break
-        return None  # 修正失败
+        return None, retry_count  # 修正失败
     finally:
         mgr.close()
 
@@ -227,12 +232,14 @@ def make_cypher_generation_node(llm):
 
         # 3) 逐条校验 + 修正
         valid_queries: list[str] = []
+        total_retries = 0
         for c in candidates:
-            fixed = _validate_and_fix(llm, c, schema_meta)
+            fixed, retry_count = _validate_and_fix(llm, c, schema_meta)
+            total_retries += retry_count
             if fixed:
                 valid_queries.append(fixed)
 
-        return {"cypher_queries": valid_queries}
+        return {"cypher_queries": valid_queries, "cypher_retry_count": total_retries}
 
     return cypher_generation_node
 

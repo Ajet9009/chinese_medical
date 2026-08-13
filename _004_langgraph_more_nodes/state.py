@@ -62,6 +62,8 @@ class GraphState(TypedDict, total=False):
     matched_sources: list[MatchedEntity]
     # 生成的 Cypher 查询语句
     cypher_queries: list[str]
+    # Cypher 校验重试次数（>0 表示生成过程中有过重试）
+    cypher_retry_count: int
     # Neo4j 执行结果（去重去噪后的精简上下文）
     neo4j_answer: str
 

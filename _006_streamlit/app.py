@@ -8,12 +8,25 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import requests
 import streamlit as st
 
 API_URL = "http://localhost:8000"
+
+
+def _send_feedback(api_url: str, trace_id: str, feedback: str) -> None:
+    """发送 👍/👎 反馈到 API，写回 Langfuse score。"""
+    try:
+        requests.post(
+            f"{api_url}/feedback",
+            json={"trace_id": trace_id, "feedback": feedback},
+            timeout=10,
+        )
+    except Exception:
+        pass  # 反馈失败不影响主流程
 
 # ── 页面配置 ──
 st.set_page_config(
@@ -45,6 +58,11 @@ if "messages" not in st.session_state:
     st.session_state.messages = []
 if "api_url" not in st.session_state:
     st.session_state.api_url = API_URL
+if "user_id" not in st.session_state:
+    # 每次打开页面（新会话）生成独立 user_id，记忆按此隔离
+    import uuid
+    st.session_state.user_id = str(uuid.uuid4())
+    st.session_state.session_id = st.session_state.user_id
 
 
 # ── 侧边栏 ──
@@ -119,6 +137,18 @@ for msg in st.session_state.messages:
                     for i, c in enumerate(cyphers):
                         st.code(c, language="cypher")
 
+        # 反馈按钮（仅 assistant 消息 + 有 trace_id）
+        if msg["role"] == "assistant" and msg.get("trace_id"):
+            fb_col1, fb_col2, fb_col3 = st.columns([1, 1, 6])
+            with fb_col1:
+                if st.button("👍", key=f"up_{msg['trace_id']}", help="回答有帮助"):
+                    _send_feedback(st.session_state.api_url, msg["trace_id"], "thumbs_up")
+                    st.toast("已反馈 👍")
+            with fb_col2:
+                if st.button("👎", key=f"down_{msg['trace_id']}", help="回答需改进"):
+                    _send_feedback(st.session_state.api_url, msg["trace_id"], "thumbs_down")
+                    st.toast("已反馈 👎")
+
 
 # ── 输入区 ──
 
@@ -139,14 +169,19 @@ if question:
 
     # ── 流式模式：SSE 实时进度 ──
     if stream_mode:
+        t_start = time.time()
         progress_placeholder = st.empty()
         with progress_placeholder.container():
-            status_box = st.status("🤔 开始思考…", expanded=True)
+            status_box = st.status("🤔 开始思考… ⏱ 0.0s", expanded=True)
 
         try:
             resp = requests.post(
                 f"{st.session_state.api_url}/ask/stream",
                 json={"question": question},
+                headers={
+                    "X-User-ID": st.session_state.user_id,
+                    "X-Session-ID": st.session_state.session_id,
+                },
                 stream=True,
                 timeout=300,
             )
@@ -160,11 +195,14 @@ if question:
                     current_event = line[6:].strip()
                 elif line.startswith("data:") and current_event:
                     data = json.loads(line[5:].strip())
+                    elapsed = time.time() - t_start
 
                     if current_event == "progress" and data.get("status") == "running":
+                        status_box.update(label=f"🤔 思考中… ⏱ {elapsed:.1f}s")
                         with status_box:
                             st.write(f"🟡 {data['label']}…")
                     elif current_event == "progress" and data.get("status") == "done":
+                        status_box.update(label=f"🤔 思考中… ⏱ {elapsed:.1f}s")
                         with status_box:
                             out = data.get("output", {})
                             summary = ""
@@ -177,8 +215,9 @@ if question:
                             st.write(f"✅ {data['label']}{summary}")
                     elif current_event == "done":
                         final_result = data
+                        total = time.time() - t_start
                         with status_box:
-                            status_box.update(label="✅ 思考完成", state="complete", expanded=False)
+                            status_box.update(label=f"✅ 思考完成 ⏱ {total:.1f}s", state="complete", expanded=False)
                     elif current_event == "error":
                         final_result = data
                         with status_box:
@@ -197,6 +236,10 @@ if question:
             resp = requests.post(
                 f"{st.session_state.api_url}/ask",
                 json={"question": question},
+                headers={
+                    "X-User-ID": st.session_state.user_id,
+                    "X-Session-ID": st.session_state.session_id,
+                },
                 timeout=300,
             )
             resp.raise_for_status()
@@ -226,6 +269,7 @@ if question:
     st.session_state.messages.append({
         "role": "assistant", "avatar": "🌿",
         "content": answer, "details": details,
+        "trace_id": final_result.get("trace_id", "") if final_result else "",
     })
 
     st.rerun()
