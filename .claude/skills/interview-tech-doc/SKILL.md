@@ -1,37 +1,42 @@
 ---
 name: interview-tech-doc
-description: 当用户提到"面试技术文档"、"面试准备"、"技术评审"、"可观测性落地"、"数据飞轮"、"企业级落地"等关键词时，加载并讲解数据飞轮与可观测性的面试技术文档，帮助理解企业生产级流程。触发场景：用户要应对面试提问、准备技术评审、梳理项目亮点、理解可观测性/评估/数据飞轮的落地实现。
+description: 当用户提到"面试技术文档"、"面试准备"、"技术评审"、"可观测性落地"、"数据飞轮"、"记忆系统"、"上下文管理"、"企业级落地"等关键词时，加载并讲解对应面试技术文档，帮助理解企业生产级流程。触发场景：用户要应对面试提问、准备技术评审、梳理项目亮点、理解可观测性/评估/数据飞轮/Agent记忆的落地实现。
 ---
 
 # 面试技术文档技能
 
-当用户提到"面试技术文档"或相关关键词时，执行以下步骤：
+当用户提到"面试技术文档"或相关关键词时，按主题选择文档：
 
-## 步骤
+## A. 数据飞轮 / 可观测性
 
-1. **读取一问一答主文档**：读取 `docs/数据飞轮/面试问答-数据飞轮.md`（企业生产级面试问答，优先用这份对练）。
+1. **一问一答**：`docs/数据飞轮/面试问答-数据飞轮.md`
+2. **原理结构**：`docs/数据飞轮/data-flywheel-interview.md`
+3. **代码索引**：`docs/数据飞轮/observability-data-flywheel.md`
 
-2. **读取原理结构文档**（需要系统讲解时）：读取 `docs/数据飞轮/data-flywheel-interview.md`（原理认知→工程取舍→面试表达→实战案例）。
+## B. 记忆与上下文管理（优先本主题时）
 
-3. **读取配套技术文档**（需代码索引时）：读取 `docs/数据飞轮/observability-data-flywheel.md`。
+1. **一问一答**：`docs/记忆AND上下文管理/面试问答-记忆与上下文.md`
+2. **技术架构**：`docs/记忆AND上下文管理/memory-context-architecture.md`
+3. **必须强调**：`ContextCompressor` / `fit_budget`（Token 预算摘要）与 Redis `LTRIM`（条数窗口）的区别——这是关键点，不可省略。
 
-4. **按"三件套"结构讲解**：
-   - **原理认知**：先讲清"为什么"（LLM 概率性 → 需要可观测性/评估/数据飞轮）
-   - **工程取舍**：每个设计决策的权衡（零侵入 vs 精细控制、动态采样 vs 全量、规则评分 vs LLM-as-Judge、为何要有 baseline）
-   - **面试表达**：给出标准回答话术（可观测性/评估/成本控制/排查能力/baseline）
-   - **实战案例**：引用项目真实数据（性能优化 25s→3s、评分对比 +3.7%、Judge 0 vs 10）
+## 通用讲解结构（三件套）
 
-5. **结合项目代码**：指出关键实现位置，让用户能对照代码讲：
-   - 动态采样：`common/langfuse_manager.py` 的 `create_handler(force)` / `should_sample`
-   - 自动评分：`common/eval_manager.py` 的 `score_auto` / `judge_answer`
-   - 数据回流：`common/build_eval_dataset.py`
-   - 回归实验：`common/run_experiment.py` / `_000_demo/demo_flywheel.py`（baseline → optimized）
-   - 记忆系统：`_008_memory/memory_manager.py`
+- **原理认知**：先讲清"为什么"
+- **工程取舍**：每个设计决策的权衡
+- **面试表达**：标准话术 + 诚实边界
+- **实战案例**：对照真实代码与演示（`demo_memory.py` / `demo_flywheel.py`）
 
-6. **模拟面试问答**：按 `面试问答-数据飞轮.md` 的题目顺序扮演面试官；强调诚实边界（强制采样是摘要、Judge 不在每次线上请求、不背未验证的网上指标）。
+## 代码锚点速查
+
+- 动态采样：`common/langfuse_manager.py`
+- 自动评分 / Judge：`common/eval_manager.py`
+- 数据回流：`common/build_eval_dataset.py`
+- 回归实验：`common/run_experiment.py` / `_000_demo/demo_flywheel.py`
+- 记忆系统：`_008_memory/memory_manager.py` · `stores.py` · `backends.py` · `factory.py`
+- API 接入：`_005_fastapi/main.py`（`_read_memory` / `_write_memory`）
 
 ## 关键原则
 
-- 强调"落地"：不只讲概念，要落到代码和真实数据。
-- 强调"取舍"：每个决策都有权衡，面试官看重的是"为什么这么选"。
-- 强调"复用"：common 层可移植到任何 LLM 项目。
+- 强调落地：落到代码，不编造未验证指标。
+- 强调取舍：为什么这么选。
+- 强调诚实边界：局限主动说。
