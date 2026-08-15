@@ -54,7 +54,7 @@ def extract_question(trace) -> str | None:
 def main() -> None:
     ap = argparse.ArgumentParser(description="从 Langfuse 拉 Bad Case 建评估数据集")
     ap.add_argument("--name", default="bad-cases", help="数据集名")
-    ap.add_argument("--limit", type=int, default=200, help="最多拉取 trace 数")
+    ap.add_argument("--limit", type=int, default=100, help="最多拉取 trace 数")
     args = ap.parse_args()
 
     evm = EvalManager()

@@ -15,7 +15,10 @@
 
 from __future__ import annotations
 
+import logging
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -26,6 +29,23 @@ from .stores import (
     ProfileStore,
     ShortTermStore,
 )
+
+logger = logging.getLogger("memory.manager")
+
+
+class AuditStore(Protocol):
+    """记忆变更审计（医疗合规）。"""
+
+    def record(
+        self,
+        user_id: str,
+        action: str,
+        *,
+        subject: str = "",
+        predicate: str = "",
+        object_value: str = "",
+        detail: str = "",
+    ) -> None: ...
 
 
 # ============================================================
@@ -163,7 +183,11 @@ class MemoryConfig:
     short_term_rounds: int = 20        # 短期记忆窗口大小
     long_term_top_k: int = 5           # 长期记忆检索条数
     token_budget: int = 4000           # 上下文 token 预算阈值
-    min_confidence: float = 0.5        # 三元组最低置信度
+    min_confidence: float = 0.5        # 三元组最低置信度（预留）
+    async_extract: bool = True         # 长期抽取异步，避免阻塞问答主路径
+    sanitize_pii: bool = True          # 写入前脱敏手机号/身份证/邮箱
+    extract_workers: int = 2           # 抽取线程池大小
+    extract_queue_size: int = 64       # 抽取排队上限；满则丢弃并打日志
 
 
 class MemoryManager:
@@ -178,6 +202,7 @@ class MemoryManager:
         embeddings: Embeddings,
         tokenizer: Tokenizer,
         config: MemoryConfig | None = None,
+        audit: AuditStore | None = None,
     ) -> None:
         self._short = short_term
         self._long = long_term
@@ -186,60 +211,181 @@ class MemoryManager:
         self._emb = embeddings
         self._tokenizer = tokenizer
         self._cfg = config or MemoryConfig()
+        self._audit = audit
         self._extractor = TripleExtractor(llm)
         self._compressor = ContextCompressor(llm, tokenizer, self._cfg.token_budget)
+        self._extract_pool = ThreadPoolExecutor(
+            max_workers=max(1, self._cfg.extract_workers),
+            thread_name_prefix="mem-extract",
+        )
+        self._extract_slots = threading.Semaphore(max(1, self._cfg.extract_queue_size))
+        self._dropped_extracts = 0
+
+    def _sanitize(self, content: str) -> str:
+        if not self._cfg.sanitize_pii:
+            return content
+        try:
+            from common.sanitizer import sanitize
+            return sanitize(content)
+        except Exception:
+            return content
+
+    def _audit_record(
+        self,
+        user_id: str,
+        action: str,
+        *,
+        subject: str = "",
+        predicate: str = "",
+        object_value: str = "",
+        detail: str = "",
+    ) -> None:
+        if self._audit is None:
+            return
+        try:
+            self._audit.record(
+                user_id,
+                action,
+                subject=subject,
+                predicate=predicate,
+                object_value=object_value,
+                detail=detail,
+            )
+        except Exception as exc:
+            logger.warning("记忆审计写入失败: %s", exc)
+
+    def health(self) -> dict[str, Any]:
+        """后端健康快照（供 /health 使用）。"""
+        info: dict[str, Any] = {
+            "short": type(self._short).__name__,
+            "long": type(self._long).__name__,
+            "profile": type(self._profile).__name__,
+            "audit": type(self._audit).__name__ if self._audit else None,
+            "async_extract": self._cfg.async_extract,
+            "dropped_extracts": self._dropped_extracts,
+            "ok": True,
+        }
+        for key, store in (
+            ("short_ok", self._short),
+            ("long_ok", self._long),
+            ("profile_ok", self._profile),
+            ("audit_ok", self._audit),
+        ):
+            if store is None:
+                info[key] = None
+                continue
+            ping = getattr(store, "ping", None)
+            if callable(ping):
+                try:
+                    info[key] = bool(ping())
+                except Exception:
+                    info[key] = False
+            else:
+                info[key] = True
+            if info[key] is False:
+                info["ok"] = False
+        return info
 
     # ============================================================
     # 写入
     # ============================================================
 
-    def add_message(self, user_id: str, session_id: str, role: str, content: str) -> None:
-        """写入一条消息：短期 + 长期（含遗忘） + 画像。
+    def add_message(
+        self,
+        user_id: str,
+        session_id: str,
+        role: str,
+        content: str,
+        *,
+        wait_extract: bool | None = None,
+    ) -> None:
+        """写入一条消息：短期同步；长期抽取默认同步或异步。
 
         Args:
             user_id: 用户 ID（跨会话稳定）。
             session_id: 会话 ID（单次对话）。
             role: user / assistant。
             content: 消息内容。
+            wait_extract: 覆盖配置；True 同步抽长期（测试用），False 强制异步。
         """
+        content = self._sanitize(content)
         msg = Message(role=role, content=content, timestamp=time.time())
 
-        # 1) 短期记忆：写入 Redis 滑动窗口
-        self._short.append(session_id, msg)
+        # 1) 短期记忆：按 user_id + session_id 隔离写入
+        self._short.append(user_id, session_id, msg)
 
         # 2) 只处理用户消息（assistant 消息不提取长期记忆）
         if role != "user":
             return
 
-        # 3) 价值判断 + 三元组提取
-        triples = self._extractor.extract(content)
-        for t in triples:
-            self._apply_triple(user_id, t, source=content)
+        # 3) 价值判断 + 三元组提取（默认有界线程池，不阻塞主请求）
+        sync = self._cfg.async_extract is False if wait_extract is None else wait_extract
+        if sync:
+            self._extract_and_apply(user_id, content)
+        else:
+            self._submit_extract(user_id, content)
+
+    def _submit_extract(self, user_id: str, content: str) -> None:
+        if not self._extract_slots.acquire(blocking=False):
+            self._dropped_extracts += 1
+            logger.warning(
+                "抽取队列已满，丢弃任务 user=%s dropped=%s",
+                user_id,
+                self._dropped_extracts,
+            )
+            self._audit_record(user_id, "extract_dropped", detail="queue_full")
+            return
+
+        def _job() -> None:
+            try:
+                self._extract_and_apply(user_id, content)
+            finally:
+                self._extract_slots.release()
+
+        self._extract_pool.submit(_job)
+
+    def _extract_and_apply(self, user_id: str, content: str) -> None:
+        try:
+            triples = self._extractor.extract(content)
+            for t in triples:
+                self._apply_triple(user_id, t, source=content)
+        except Exception as exc:
+            logger.warning("长期记忆抽取失败 user=%s: %s", user_id, exc)
+            self._audit_record(user_id, "extract_error", detail=str(exc)[:200])
 
     def _apply_triple(self, user_id: str, triple: dict, source: str) -> None:
         """应用单个三元组：set 更新 / delete 遗忘。
 
         信息冲突解决的核心：subject+predicate 唯一，新值覆盖旧值。
         """
-        subject = triple.get("subject", "")
-        predicate = triple.get("predicate", "")
-        obj = triple.get("object", "")
-        action = triple.get("action", "set")
+        subject = str(triple.get("subject", "")).strip()
+        predicate = str(triple.get("predicate", "")).strip()
+        obj = str(triple.get("object", "")).strip()
+        action = str(triple.get("action", "set")).strip() or "set"
+
+        if not subject or not predicate:
+            return
 
         if action == "delete":
-            # 【遗忘】删除匹配的旧记忆，不存储
-            removed = self._long.delete(user_id, subject, predicate)
+            self._long.delete(user_id, subject, predicate)
+            # 画像字段同步清除
+            if subject == "用户" and predicate in ("偏好", "身份", "计划"):
+                self._profile.upsert(user_id, predicate, None)
+            self._audit_record(
+                user_id, "forget", subject=subject, predicate=predicate, object_value=obj
+            )
             return
 
         # 【信息冲突】先删除旧的同 subject+predicate，再写入新的
-        # 避免"银行卡尾号1234"和"银行卡尾号5678"同时存在
         self._long.delete(user_id, subject, predicate)
 
-        # 【画像同步】若 subject 是"用户"且 predicate 是偏好类，写入结构化画像
-        if subject == "用户" and predicate in ("偏好", "身份", "计划"):
+        # 【画像同步】结构化偏好落画像库
+        if subject == "用户" and predicate in ("偏好", "身份", "计划") and obj:
             self._profile.upsert(user_id, predicate, obj)
+            self._audit_record(
+                user_id, "profile_upsert", subject=subject, predicate=predicate, object_value=obj
+            )
 
-        # 写入长期记忆（带 embedding + source + timestamp，防幻觉）
         mem = MemoryTriple(
             subject=subject,
             predicate=predicate,
@@ -249,6 +395,9 @@ class MemoryManager:
         )
         embedding = self._emb.embed_query(mem.to_text())
         self._long.add(user_id, mem, embedding)
+        self._audit_record(
+            user_id, "triple_upsert", subject=subject, predicate=predicate, object_value=obj
+        )
 
     # ============================================================
     # 读取
@@ -261,7 +410,6 @@ class MemoryManager:
         """
         parts: list[str] = []
 
-        # 1) 长期记忆：语义检索相关三元组
         query_vec = self._emb.embed_query(current_input)
         long_mems = self._long.search(user_id, query_vec, self._cfg.long_term_top_k)
         if long_mems:
@@ -270,16 +418,16 @@ class MemoryManager:
             )
             parts.append(f"【长期记忆】\n{lines}")
 
-        # 2) 用户画像：结构化偏好
-        profile = self._profile.get_all(user_id)
+        profile = {
+            k: v for k, v in (self._profile.get_all(user_id) or {}).items()
+            if v is not None and v != ""
+        }
         if profile:
             plines = "\n".join(f"- {k}: {v}" for k, v in profile.items())
             parts.append(f"【用户画像】\n{plines}")
 
-        # 3) 短期记忆：最近 N 轮对话（传给 compressor 做预算压缩，避免重复拼接）
-        short_msgs = self._short.recent(session_id, self._cfg.short_term_rounds)
+        short_msgs = self._short.recent(user_id, session_id, self._cfg.short_term_rounds)
 
-        # 4) Token 预算：长期记忆+画像作 prefix，短期作 messages，当前输入作 suffix
         prefix = "\n\n".join(parts) + "\n\n" if parts else ""
         suffix = f"\n\n【当前输入】\n{current_input}"
         return self._compressor.fit_budget(short_msgs, prefix, suffix)

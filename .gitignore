@@ -30,9 +30,19 @@ cookie/*
 !cookie/.gitkeep
 *.log
 
+# 本地运行/演示输出（勿入库、不在仓库建临时目录）
+*_out.txt
+*_out.json
+*_run.log
+streamlit_check.txt
+.tmp_agent/
+_tmp*
+
 # 系统文件
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/
 *.lnk
+.cursor/mcp.json
+.claude/settings.local.json

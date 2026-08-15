@@ -216,11 +216,11 @@ def _make_handler(request: Request, trace_name: str, force: bool = False):
     if not mgr.is_enabled():
         return None
 
-    session_id = request.headers.get("X-Session-ID", str(uuid.uuid4()))
+    user_id, session_id = _get_identity(request)
     metadata = {
         "request_id": str(uuid.uuid4()),
         "session_id": session_id,
-        "user_id": "anonymous",
+        "user_id": user_id,
     }
     return mgr.create_handler(trace_name=trace_name, metadata=metadata, force=force)
 
@@ -230,10 +230,10 @@ def _force_sample_summary(
 ) -> None:
     """异常/重试/低分时，即使未命中采样也强制记录摘要 trace。"""
     mgr: LangfuseManager = request.app.state.langfuse_mgr
-    session_id = request.headers.get("X-Session-ID", str(uuid.uuid4()))
+    user_id, session_id = _get_identity(request)
     mgr.record_summary_span(
         trace_name=trace_name,
-        metadata={"session_id": session_id, "user_id": "anonymous"},
+        metadata={"session_id": session_id, "user_id": user_id},
         summary={"reason": reason, **summary},
     )
 
@@ -261,8 +261,10 @@ def _check_force_sample(final_state: dict, elapsed_ms: float = 0.0) -> str | Non
 
 
 @app.get("/health")
-def health():
-    return {"status": "ok"}
+def health(request: Request):
+    mem = getattr(request.app.state, "memory_mgr", None)
+    memory = mem.health() if mem is not None and hasattr(mem, "health") else None
+    return {"status": "ok", "memory": memory}
 
 
 @app.post("/ask", response_model=AskResponse)
@@ -296,6 +298,9 @@ def ask(payload: AskRequest, request: Request) -> AskResponse:
     # 写入记忆（用户消息 + 回答）
     answer = final_state.get("final_answer", "") or ""
     _write_memory(request, payload.question, answer)
+
+    # 显式 flush Langfuse，确保 trace/span/generation 立即上报
+    request.app.state.langfuse_mgr.flush(timeout=5.0)
 
     trace_id = handler.trace_id if handler is not None else ""
     return _build_response(payload.question, final_state, elapsed, trace_id)
@@ -424,6 +429,8 @@ async def ask_stream(payload: AskRequest, request: Request):
                     # 写入记忆（用户消息 + 回答）
                     answer = final_state.get("final_answer", "") or ""
                     _write_memory(request, payload.question, answer)
+                    # 显式 flush Langfuse
+                    request.app.state.langfuse_mgr.flush(timeout=5.0)
                     trace_id = handler.trace_id if handler is not None else ""
                     resp = _build_response(payload.question, final_state, elapsed, trace_id)
                     yield _sse("done", resp.model_dump())

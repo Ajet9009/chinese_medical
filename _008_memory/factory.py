@@ -3,9 +3,9 @@
 """记忆系统工厂：注入真实依赖（Redis / 向量库 / LLM / BGE / tiktoken）。
 
 企业级特性：
-  - 依赖降级：Redis 不可用 → 内存 fallback；LLM/Embedding 失败 → 不阻塞主流程
+  - 依赖降级：Redis 不可用 → 内存；Milvus 不可用 → JSON；MySQL 不可用 → JSON
   - 单例复用：BGE 模型、Redis 客户端全局单例，避免重复加载
-  - 持久化：长期记忆 JSON 落盘，重启不丢
+  - 持久化：长期记忆优先 Milvus；画像优先 MySQL；均可落盘降级
 
 用法:
     from _008_memory.factory import create_memory_manager
@@ -28,12 +28,14 @@ import numpy as np
 from .memory_manager import LLM, Embeddings, MemoryManager, Tokenizer
 from .stores import (
     DictProfileStore,
+    JsonProfileStore,
     LongTermStore,
     MemoryTriple,
     Message,
     ProfileStore,
     RedisShortTermStore,
     ShortTermStore,
+    short_term_key,
 )
 
 logger = logging.getLogger("memory.factory")
@@ -59,10 +61,12 @@ def _get_redis_client():
     if _redis_client is None:
         try:
             import redis
+            password = os.getenv("REDIS_PASSWORD", "") or None
             _redis_client = redis.Redis(
                 host=os.getenv("REDIS_HOST", "localhost"),
                 port=int(os.getenv("REDIS_PORT", "6379")),
-                db=0,
+                db=int(os.getenv("REDIS_DB", "0")),
+                password=password,
                 socket_connect_timeout=2,
                 socket_timeout=2,
             )
@@ -71,6 +75,82 @@ def _get_redis_client():
             logger.warning("Redis 不可用，降级为内存短期记忆: %s", exc)
             _redis_client = None
     return _redis_client
+
+
+def _create_long_term_store(embeddings: Embeddings) -> LongTermStore:
+    """优先 Milvus，失败回退 JSON 向量库。"""
+    prefer = os.getenv("MEMORY_LONG_BACKEND", "milvus").strip().lower()
+    if prefer in ("milvus", "auto"):
+        try:
+            from .backends import MilvusLongTermStore
+            dim = int(os.getenv("MEMORY_EMBED_DIM", "1024"))
+            store = MilvusLongTermStore(
+                host=os.getenv("MILVUS_HOST", "127.0.0.1"),
+                port=int(os.getenv("MILVUS_PORT", "19530")),
+                database=os.getenv("MILVUS_DATABASE", "itcast"),
+                # 独立 collection，避免覆盖业务 edurag
+                collection=os.getenv("MILVUS_MEMORY_COLLECTION", "agent_long_term_memory"),
+                dim=dim,
+            )
+            logger.info("长期记忆后端: Milvus")
+            return store
+        except Exception as exc:
+            logger.warning("Milvus 不可用，长期记忆降级 JSON: %s", exc)
+    store = JsonLongTermStore(MEMORY_DATA_DIR, embeddings)
+    logger.info("长期记忆后端: JsonLongTermStore")
+    return store
+
+
+def _create_profile_store() -> ProfileStore:
+    """优先 MySQL，失败回退 JSON 画像。"""
+    prefer = os.getenv("MEMORY_PROFILE_BACKEND", "mysql").strip().lower()
+    if prefer in ("mysql", "auto"):
+        try:
+            from .backends import MySQLProfileStore
+            store = MySQLProfileStore(
+                host=os.getenv("MYSQL_HOST", "localhost"),
+                port=int(os.getenv("MYSQL_PORT", "3306")),
+                user=os.getenv("MYSQL_USER", "root"),
+                password=os.getenv("MYSQL_PASSWORD", ""),
+                database=os.getenv("MYSQL_DATABASE", "subjects_kg"),
+                table=os.getenv("MYSQL_PROFILE_TABLE", "agent_user_profile"),
+                pool_size=int(os.getenv("MYSQL_POOL_SIZE", "4")),
+            )
+            logger.info("画像后端: MySQL")
+            return store
+        except Exception as exc:
+            logger.warning("MySQL 不可用，画像降级 JSON: %s", exc)
+    store = JsonProfileStore(MEMORY_DATA_DIR)
+    logger.info("画像后端: JsonProfileStore")
+    return store
+
+
+def _create_audit_store():
+    """优先 MySQL 审计表，失败回退 JSONL。"""
+    prefer = os.getenv("MEMORY_AUDIT_BACKEND", "mysql").strip().lower()
+    if prefer in ("mysql", "auto"):
+        try:
+            from .backends import MySQLAuditStore
+            store = MySQLAuditStore(
+                host=os.getenv("MYSQL_HOST", "localhost"),
+                port=int(os.getenv("MYSQL_PORT", "3306")),
+                user=os.getenv("MYSQL_USER", "root"),
+                password=os.getenv("MYSQL_PASSWORD", ""),
+                database=os.getenv("MYSQL_DATABASE", "subjects_kg"),
+                table=os.getenv("MYSQL_AUDIT_TABLE", "agent_memory_audit"),
+                pool_size=int(os.getenv("MYSQL_AUDIT_POOL_SIZE", "2")),
+            )
+            logger.info("审计后端: MySQL")
+            return store
+        except Exception as exc:
+            logger.warning("MySQL 审计不可用，降级 JSONL: %s", exc)
+    if prefer in ("off", "none", "false", "0"):
+        logger.info("审计后端: 关闭")
+        return None
+    from .backends import JsonAuditStore
+    store = JsonAuditStore(MEMORY_DATA_DIR)
+    logger.info("审计后端: JsonAuditStore")
+    return store
 
 
 def _get_bge_model():
@@ -222,21 +302,24 @@ class JsonLongTermStore:
 
 
 class InMemoryShortTermStore:
-    """内存短期记忆（Redis 降级 fallback）。"""
+    """内存短期记忆（Redis 降级 fallback）。键 = user_id:session_id。"""
 
     def __init__(self, max_rounds: int = 20) -> None:
         self._max = max_rounds
         self._data: dict[str, list[Message]] = {}
 
-    def append(self, session_id: str, message: Message) -> None:
-        self._data.setdefault(session_id, []).append(message)
-        self._data[session_id] = self._data[session_id][-self._max:]
+    def append(self, user_id: str, session_id: str, message: Message) -> None:
+        key = short_term_key(user_id, session_id)
+        self._data.setdefault(key, []).append(message)
+        self._data[key] = self._data[key][-self._max:]
 
-    def recent(self, session_id: str, n: int) -> list[Message]:
-        return self._data.get(session_id, [])[-n:]
+    def recent(self, user_id: str, session_id: str, n: int) -> list[Message]:
+        key = short_term_key(user_id, session_id)
+        return self._data.get(key, [])[-n:]
 
-    def trim(self, session_id: str, keep: int) -> None:
-        self._data[session_id] = self._data.get(session_id, [])[-keep:]
+    def trim(self, user_id: str, session_id: str, keep: int) -> None:
+        key = short_term_key(user_id, session_id)
+        self._data[key] = self._data.get(key, [])[-keep:]
 
 
 # ============================================================
@@ -265,23 +348,36 @@ def create_memory_manager() -> MemoryManager:
         if _memory_manager is not None:
             return _memory_manager
 
+        from .memory_manager import MemoryConfig
+
         embeddings = BgeEmbeddings()
         tokenizer = TiktokenTokenizer()
         llm = ChatLLMAdapter(create_llm())
 
+        ttl = int(os.getenv("MEMORY_SHORT_TTL_SECONDS", str(7 * 24 * 3600)))
+        max_rounds = int(os.getenv("MEMORY_SHORT_ROUNDS", "20"))
+
         # 短期记忆：Redis 优先，降级内存
         redis_client = _get_redis_client()
         short_term: ShortTermStore = (
-            RedisShortTermStore(redis_client)
+            RedisShortTermStore(redis_client, max_rounds=max_rounds, ttl_seconds=ttl)
             if redis_client is not None
-            else InMemoryShortTermStore()
+            else InMemoryShortTermStore(max_rounds=max_rounds)
         )
 
-        # 长期记忆：JSON 持久化向量库
-        long_term: LongTermStore = JsonLongTermStore(MEMORY_DATA_DIR, embeddings)
+        # 长期记忆：Milvus 优先 → JSON
+        long_term: LongTermStore = _create_long_term_store(embeddings)
 
-        # 画像：内存（接口可换 Postgres/Mongo）
-        profile: ProfileStore = DictProfileStore()
+        # 画像：MySQL 优先 → JSON
+        profile: ProfileStore = _create_profile_store()
+
+        async_extract = os.getenv("MEMORY_ASYNC_EXTRACT", "true").strip().lower() not in (
+            "false", "0", "no", "off",
+        )
+        extract_workers = int(os.getenv("MEMORY_EXTRACT_WORKERS", "2"))
+        extract_queue_size = int(os.getenv("MEMORY_EXTRACT_QUEUE_SIZE", "64"))
+
+        audit = _create_audit_store()
 
         _memory_manager = MemoryManager(
             short_term=short_term,
@@ -290,8 +386,22 @@ def create_memory_manager() -> MemoryManager:
             llm=llm,
             embeddings=embeddings,
             tokenizer=tokenizer,
+            config=MemoryConfig(
+                short_term_rounds=max_rounds,
+                async_extract=async_extract,
+                extract_workers=extract_workers,
+                extract_queue_size=extract_queue_size,
+            ),
+            audit=audit,
         )
-        logger.info("MemoryManager 初始化完成")
+        logger.info(
+            "MemoryManager 初始化完成 short=%s long=%s profile=%s audit=%s async_extract=%s",
+            type(short_term).__name__,
+            type(long_term).__name__,
+            type(profile).__name__,
+            type(audit).__name__ if audit else None,
+            async_extract,
+        )
         return _memory_manager
 
 
@@ -302,3 +412,10 @@ def get_memory_manager() -> MemoryManager | None:
     except Exception as exc:
         logger.warning("MemoryManager 初始化失败，记忆功能降级: %s", exc)
         return None
+
+
+def reset_memory_manager() -> None:
+    """重置单例（仅测试用）。"""
+    global _memory_manager
+    with _factory_lock:
+        _memory_manager = None

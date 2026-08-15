@@ -46,18 +46,23 @@ class MemoryTriple:
 # 存储接口（Protocol）
 # ============================================================
 
-class ShortTermStore(Protocol):
-    """短期记忆：Redis 滑动窗口。"""
+def short_term_key(user_id: str, session_id: str) -> str:
+    """短期记忆键：必须 user_id + session_id 联合隔离，防止同 session 串用户。"""
+    return f"mem:short:{user_id}:{session_id}"
 
-    def append(self, session_id: str, message: Message) -> None:
+
+class ShortTermStore(Protocol):
+    """短期记忆：Redis 滑动窗口（按 user_id + session_id 隔离）。"""
+
+    def append(self, user_id: str, session_id: str, message: Message) -> None:
         """追加一条消息到会话窗口末尾。"""
         ...
 
-    def recent(self, session_id: str, n: int) -> list[Message]:
+    def recent(self, user_id: str, session_id: str, n: int) -> list[Message]:
         """返回最近 n 条消息（时间序）。"""
         ...
 
-    def trim(self, session_id: str, keep: int) -> None:
+    def trim(self, user_id: str, session_id: str, keep: int) -> None:
         """裁剪窗口，只保留最近 keep 条。"""
         ...
 
@@ -102,39 +107,53 @@ class RedisShortTermStore:
     """Redis 滑动窗口实现。
 
     用 Redis List（LPUSH + LTRIM）维护最近 N 条，天然滑动窗口。
-    旧消息被 LTRIM 裁剪，避免无限增长。
+    Key = user_id:session_id，并设置 TTL，避免会话键无限堆积。
     """
 
-    def __init__(self, redis_client: Any, max_rounds: int = 20) -> None:
+    def __init__(
+        self,
+        redis_client: Any,
+        max_rounds: int = 20,
+        ttl_seconds: int = 7 * 24 * 3600,
+    ) -> None:
         self._r = redis_client
         self._max_rounds = max_rounds
+        self._ttl = ttl_seconds
 
-    def append(self, session_id: str, message: Message) -> None:
+    def append(self, user_id: str, session_id: str, message: Message) -> None:
         import json
-        key = f"mem:short:{session_id}"
+        key = short_term_key(user_id, session_id)
         payload = json.dumps({
             "role": message.role,
             "content": message.content,
             "timestamp": message.timestamp,
         }, ensure_ascii=False)
-        # LPUSH 放头部 + LTRIM 只留最近 N 条 → 滑动窗口
-        self._r.lpush(key, payload)
-        self._r.ltrim(key, 0, self._max_rounds - 1)
+        pipe = self._r.pipeline()
+        pipe.lpush(key, payload)
+        pipe.ltrim(key, 0, self._max_rounds - 1)
+        if self._ttl > 0:
+            pipe.expire(key, self._ttl)
+        pipe.execute()
 
-    def recent(self, session_id: str, n: int) -> list[Message]:
+    def recent(self, user_id: str, session_id: str, n: int) -> list[Message]:
         import json
-        key = f"mem:short:{session_id}"
+        key = short_term_key(user_id, session_id)
         items = self._r.lrange(key, 0, n - 1)
-        # lrange 返回新→旧，反转成旧→新
         messages = []
         for raw in reversed(items):
             d = json.loads(raw)
             messages.append(Message(d["role"], d["content"], d.get("timestamp", 0.0)))
         return messages
 
-    def trim(self, session_id: str, keep: int) -> None:
-        key = f"mem:short:{session_id}"
+    def trim(self, user_id: str, session_id: str, keep: int) -> None:
+        key = short_term_key(user_id, session_id)
         self._r.ltrim(key, 0, keep - 1)
+
+    def ping(self) -> bool:
+        try:
+            return bool(self._r.ping())
+        except Exception:
+            return False
 
 
 # ============================================================
@@ -198,13 +217,67 @@ class LangChainLongTermStore:
 # ============================================================
 
 class DictProfileStore:
-    """内存字典实现（生产换 Postgres/Mongo，接口一致）。"""
+    """内存字典实现（测试 / 临时 fallback；生产用 JsonProfileStore 或 DB）。"""
 
     def __init__(self) -> None:
         self._data: dict[str, dict[str, Any]] = {}
 
     def upsert(self, user_id: str, key: str, value: Any) -> None:
-        self._data.setdefault(user_id, {})[key] = value
+        self._data.setdefault(user_id, {})
+        if value is None:
+            self._data[user_id].pop(key, None)
+        else:
+            self._data[user_id][key] = value
+
+    def get(self, user_id: str, key: str) -> Any | None:
+        return self._data.get(user_id, {}).get(key)
+
+    def get_all(self, user_id: str) -> dict[str, Any]:
+        return dict(self._data.get(user_id, {}))
+
+
+class JsonProfileStore:
+    """JSON 落盘用户画像（重启不丢；接口可替换为 Postgres/Mongo）。"""
+
+    def __init__(self, data_dir: Any) -> None:
+        from pathlib import Path
+        import threading
+
+        self._data_dir = Path(data_dir)
+        self._data_dir.mkdir(parents=True, exist_ok=True)
+        self._file = self._data_dir / "profile.json"
+        self._lock = threading.Lock()
+        self._data: dict[str, dict[str, Any]] = self._load()
+
+    def _load(self) -> dict[str, dict[str, Any]]:
+        import json
+        if self._file.exists():
+            try:
+                raw = json.loads(self._file.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    return raw
+            except (json.JSONDecodeError, OSError):
+                pass
+        return {}
+
+    def _save(self) -> None:
+        import json
+        try:
+            self._file.write_text(
+                json.dumps(self._data, ensure_ascii=False, indent=1),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def upsert(self, user_id: str, key: str, value: Any) -> None:
+        with self._lock:
+            self._data.setdefault(user_id, {})
+            if value is None:
+                self._data[user_id].pop(key, None)
+            else:
+                self._data[user_id][key] = value
+            self._save()
 
     def get(self, user_id: str, key: str) -> Any | None:
         return self._data.get(user_id, {}).get(key)

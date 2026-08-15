@@ -234,14 +234,18 @@ X-Session-ID: <随机 UUID>  # 会话级隔离（短期对话）
 ## 📊 评估闭环（数据飞轮）
 
 ```
-生产 Trace → 自动评分（cypher_success/retry_count/answer_nonempty）
-   → Bad Case（强制采样）→ 构建数据集 → 回归实验 → 优化 Prompt/模型
+生产 Trace → 自动评分（三层体系）→ Bad Case（强制采样）
+   → 构建数据集 → 回归实验 → 优化 Prompt/模型
 ```
 
-- **自动评分**：请求结束自动打分
+- **三层评分**：
+  - 规则型：`cypher_success` / `retry_count` / `answer_nonempty`（免费）
+  - 启发式：`answer_quality`（长度归一化）
+  - **LLM-as-Judge**：`judge_accuracy` / `judge_completeness` / `judge_relevance`（0-10 主观质量）
 - **动态采样**：正常 10%，异常/重试/低分/慢请求 100% 强制记录
 - **数据回流**：`python common/build_eval_dataset.py` 拉 Bad Case 建数据集
 - **回归实验**：`python common/run_experiment.py` 数据集跑分对比
+- **LLM-as-Judge 演示**：`python _000_demo/demo_judge.py` 好/坏回答对比打分
 - **用户反馈**：前端 👍/👎 回传 `user_feedback` score
 
 ---

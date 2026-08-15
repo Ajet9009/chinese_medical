@@ -381,6 +381,7 @@ class LangfuseManager:
                 name=trace_name,
                 metadata=meta,
                 tags=["tcm-qa", "forced-sampling"],
+                input={"user_question": summary.get("question", "")},
             )
             span = trace.span(
                 name="summary",

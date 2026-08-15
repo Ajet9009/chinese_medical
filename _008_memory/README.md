@@ -1,79 +1,57 @@
 # 企业级 Agent 记忆系统
 
-分层记忆框架：短期（Redis）+ 长期（向量库）+ 画像（结构化 DB），含 Token 预算压缩与实体遗忘。
+分层记忆：短期 Redis + 长期 Milvus + 画像 MySQL + 审计；失败自动降级。
+
+## 本地服务映射
+
+| 层 | 服务 | 配置 | 说明 |
+|----|------|------|------|
+| 短期 | Redis `localhost:6379` | `REDIS_*` | key=`mem:short:{user}:{session}` + TTL |
+| 画像 | MySQL `subjects_kg` | `MYSQL_*` | 表 `agent_user_profile`（自动建表） |
+| 长期 | Milvus `19530` / db `itcast` | `MILVUS_*` | collection **`agent_long_term_memory`**（独立，不占用 `edurag`） |
+| 审计 | MySQL | `MEMORY_AUDIT_BACKEND` | 表 `agent_memory_audit`（无完整 PHI，仅预览） |
+
+降级：Redis→内存；Milvus→`data/memory/long_term.json`；MySQL→`profile.json`；审计→`memory_audit.jsonl`。
+
+## 生产级特性
+
+- **用户隔离**：短期键必须 `user_id + session_id`
+- **有界抽取队列**：`ThreadPoolExecutor` + 信号量；队列满丢弃并审计
+- **PII 脱敏**：写入前 `sanitize`
+- **冲突覆盖 / 遗忘**：同 `subject+predicate` 覆盖；`action=delete` 删除
+- **连接池**：MySQL Profile/Audit 复用连接
+- **健康检查**：`GET /health` 返回各层后端与 ping 结果
+
+## Cursor MCP（已写入）
+
+- 用户级：`C:\Users\Administrator\.cursor\mcp.json`
+- 项目级：`.cursor/mcp.json`
+
+| MCP 名 | 用途 |
+|--------|------|
+| `local-mysql` | 查/改 `subjects_kg` |
+| `local-redis` | Redis 命令 |
+| `local-milvus` | Milvus（db=`itcast`） |
+
+改完 mcp.json 后请在 Cursor：**Settings → MCP → Refresh**。
 
 ## 架构
 
 ```
-add_message 写入
-  ├─ 短期记忆：Redis 滑动窗口（LPUSH + LTRIM，最近 N 轮）
-  ├─ 价值判断：LLM 提取三元组（忽略寒暄）
-  ├─ 信息冲突：subject+predicate 唯一，新值覆盖旧值
-  └─ 实体遗忘：action=delete 删除旧记忆
+add_message
+  ├─ PII 脱敏
+  ├─ Redis 短期（user+session）
+  └─ 有界线程池抽三元组 → Milvus + MySQL 画像 + 审计
 
-get_context 读取
-  ├─ 长期记忆：向量检索 top_k 相关三元组
-  ├─ 用户画像：结构化偏好
-  ├─ 短期记忆：最近 N 轮对话
-  └─ Token 预算：超阈值触发摘要压缩（不截断）
+get_context
+  ├─ Milvus 按 user 检索
+  ├─ MySQL 画像
+  └─ Redis 近期对话 + Token 预算压缩
 ```
 
-## 核心文件
+## 演示 / 测试
 
-| 文件 | 职责 |
-|------|------|
-| `stores.py` | 三层存储抽象 + Redis/向量/画像实现 |
-| `memory_manager.py` | MemoryManager 主类 + 三元组提取 + Token 预算 |
-
-## 解决的两个核心问题
-
-### 1. 幻觉（Hallucination）
-
-- 每条长期记忆带 `source`（来源消息）+ `timestamp`，可追溯。
-- 检索时按 `user_id` 隔离，避免串记忆。
-- 只返回有来源的事实，不凭空生成。
-
-### 2. 信息冲突（Information Conflict）
-
-- 三元组以 `(subject, predicate)` 为唯一键。
-- 写入新值前先删除旧值 → 不重复存储矛盾信息。
-- 否定意图（"我不用那个卡了"）→ `action=delete` 直接删除。
-- 冲突时取 `timestamp` 最新的。
-
-## Token 预算管理
-
-超阈值（默认 4k）不直接截断，而是：
-1. 从后往前保留最近消息，直到剩余放得下
-2. 前半段用 LLM 摘要压缩
-3. 摘要失败降级为截断（保底）
-
-## 使用示例
-
-```python
-from _008_memory.memory_manager import MemoryManager, MemoryConfig
-from _008_memory.stores import RedisShortTermStore, LangChainLongTermStore, DictProfileStore
-
-mgr = MemoryManager(
-    short_term=RedisShortTermStore(redis_client),
-    long_term=LangChainLongTermStore(vectorstore, embeddings),
-    profile=DictProfileStore(),
-    llm=llm,
-    embeddings=embeddings,
-    tokenizer=tiktoken_tokenizer,
-    config=MemoryConfig(token_budget=4000),
-)
-
-# 写入
-mgr.add_message("u1", "s1", "user", "我喝咖啡，不用尾号1234的卡了")
-
-# 读取
-context = mgr.get_context("u1", "s1", "给我推荐一家咖啡馆")
+```bash
+python _000_demo/demo_memory.py
+python -m unittest tests.test_memory_isolation -v
 ```
-
-## 技术栈
-
-- Python 3.10+
-- LangChain（VectorStore + LLM 抽象）
-- Redis（短期存储）
-- tiktoken（Token 计算）
-- Postgres / Mongo（用户画像，可替换）
