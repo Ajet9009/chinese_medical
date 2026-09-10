@@ -1,0 +1,17 @@
+# 本仓库只编排 Redis。Neo4j 使用本机已有 4.4 实例（bolt://localhost:7687）。
+# 若 6379 已被其它 compose（例如 milvus_data）占用，不要再起本服务，
+# 在 .env 里把 REDIS_URL 指到已有 Redis 即可。
+#
+# 启动: docker compose up -d redis
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:

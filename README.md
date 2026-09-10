@@ -76,23 +76,29 @@ _002_extract_information/   知识抽取（LLM 实体关系抽取 + 规则层合
 _003_create_neo4j_database/ Neo4j 入库 + FAISS 索引构建
 _004_langgraph_more_nodes/  LangGraph 图节点（核心）
 ├── state.py                  GraphState 定义 + KG 实体/关系常量
-├── graph.py                  图编排（7 节点 + 条件路由）
+├── graph.py                  图编排（8 节点 + 条件路由）
+├── standalone_query.py       节点0: 多轮指代消解
 ├── intent_recognition.py     节点1: 意图识别
-├── entity_extraction.py      节点2: 六类实体抽取
+├── entity_extraction.py     节点2: 六类实体抽取
 ├── entity_normalization.py   节点3: FAISS+BGE 向量匹配
 ├── cypher_generation.py      节点4: Cypher 生成 + 校验修正
 ├── cypher_executor.py        节点5: 图查询执行
-├── answer_generation.py      节点6: 最终回答
+├── answer_generation.py      节点6: 最终回答（token 流式）
 └── general_response.py       节点7: 非中医问题回答
-_005_fastapi/               FastAPI 服务（/ask + /ask/stream）
-_006_streamlit/             Streamlit 前端
+_005_fastapi/               FastAPI 服务（/ask + 会话 CRUD + SSE）
+_006_streamlit/             Streamlit 前端（遗留）
 _007_fine_tune/             vllm 微调模型客户端（LoRA 多适配器）
+frontend/                   Vue 3 Chat（主前端，端口 5174，避开电网项目 5173）
 common/                     公共模块
+├── env_loader.py             加载 common/.env 与根目录 .env
 ├── neo4j_manager.py          Neo4j 连接/导入/校验/执行/元数据
 ├── faiss_vector_store.py     FAISS 向量存储
+├── redis_client.py           Redis 连接（失败返回 None）
+├── conversation_store.py     SQLite 会话 + Redis List/LTRIM
 ├── langfuse_manager.py       Langfuse 客户端（追踪/采样/成本）
 ├── sanitizer.py              PII 脱敏
 └── export_neo4j_metadata.py  导出图 schema
+docker-compose.yml          仅 Redis（Neo4j 用本机实例）
 tests/                      单元测试
 ```
 
@@ -104,14 +110,15 @@ tests/                      单元测试
 
 - Python 3.10+
 - Neo4j 4.4（本地 7687 端口）
-- Docker（用于 Langfuse 等基础设施）
+- Docker（用于本仓库 Redis；Langfuse 可选）
 
-### 第 1 步：启动 Docker 基础设施
+### 第 1 步：启动 Redis（本仓库 compose，仅 Redis）
 
 ```bash
-cd E:\devapp\milvus_data
-docker compose up -d    # Langfuse、Milvus、MySQL 等
+docker compose up -d redis
 ```
+
+若本机 6379 已被其它 compose（例如 `E:\devapp\milvus_data`）占用，不要再起本服务，把 `.env` 的 `REDIS_URL` 指到已有 Redis。Langfuse 仍可用原有基础设施。
 
 ### 第 2 步：启动 Neo4j
 
@@ -122,7 +129,7 @@ neo4j.bat console        # 或 neo4j.bat start
 
 ### 第 3 步：配置环境变量
 
-复制 `common/.env` 并填写：
+复制 `.env.example` 为仓库根目录 `.env`（或 `common/.env`）并填写。根目录 `.env` 会覆盖 `common/.env`。
 
 ```bash
 # 大模型
@@ -140,6 +147,13 @@ EMBEDDING_MODEL_PATH=path/to/bge-large-zh-v1.5
 FAISS_INDEX_PATH=path/to/entities.index
 FAISS_METADATA_PATH=path/to/entities.json
 
+# 会话
+REDIS_URL=redis://localhost:6379/0
+CONVERSATION_DB_PATH=data/conversations.sqlite
+REDIS_HISTORY_MAX=50
+GRAPH_HISTORY_LIMIT=6
+TOKEN_BUDGET=2000
+
 # Langfuse（可观测性）
 LANGFUSE_SECRET_KEY=sk-lf-xxx
 LANGFUSE_PUBLIC_KEY=pk-lf-xxx
@@ -151,9 +165,8 @@ LANGFUSE_SAMPLE_RATE=1.0
 ### 第 4 步：安装依赖
 
 ```bash
-pip install neo4j python-dotenv numpy faiss-cpu sentence-transformers \
-            langchain langchain-openai langgraph fastapi uvicorn \
-            streamlit langfuse pydantic
+pip install -r requirements.txt
+npm --prefix frontend install
 ```
 
 ### 第 5 步：启动服务
@@ -162,14 +175,16 @@ pip install neo4j python-dotenv numpy faiss-cpu sentence-transformers \
 # 终端 1：API 服务（端口 8000）
 python -m _005_fastapi.main
 
-# 终端 2：Streamlit 前端（端口 8501）
-python _006_streamlit/run.py
+# 终端 2：Vue Chat（端口 5174，避开电网项目 5173）
+npm --prefix frontend run dev
 ```
 
 访问：
-- 前端：http://localhost:8501
+- 前端：http://localhost:5174
 - API 文档：http://localhost:8000/docs
-- Langfuse：http://localhost:3000
+- Langfuse：http://localhost:3000（若已启动）
+
+遗留 Streamlit：`python _006_streamlit/run.py`（端口 8501，不回传会话）。
 
 ---
 
@@ -193,7 +208,7 @@ curl -X POST http://localhost:8000/ask/stream \
   -d '{"question": "四君子汤有什么功效？"}'
 ```
 
-逐节点推送进度（`event: progress`），最终 `event: done` 返回完整结果。
+SSE 事件：`session`（会话 id）→ `progress`（图节点）→ `token`（仅最终回答节点）→ `done`。可带 `conversation_id` 做多轮。
 
 ---
 
@@ -210,6 +225,9 @@ curl -X POST http://localhost:8000/ask/stream \
 ## 🧪 测试
 
 ```bash
+# 全量单测
+pytest tests/ -q
+
 # Langfuse 集成测试
 pytest tests/test_langfuse_integration.py -v
 

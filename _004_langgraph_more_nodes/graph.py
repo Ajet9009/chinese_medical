@@ -10,6 +10,7 @@ try:
     from .entity_normalization import entity_normalization_node
     from .general_response import general_response_node
     from .intent_recognition import intent_recognition_node
+    from .standalone_query import standalone_query_node
     from .state import GraphState
 except ImportError:
     from answer_generation import answer_generation_node
@@ -19,6 +20,7 @@ except ImportError:
     from entity_normalization import entity_normalization_node
     from general_response import general_response_node
     from intent_recognition import intent_recognition_node
+    from standalone_query import standalone_query_node
     from state import GraphState
 
 
@@ -33,6 +35,7 @@ def build_graph():
     workflow = StateGraph(GraphState)
 
     # 节点注册
+    workflow.add_node("standalone_query", standalone_query_node)
     workflow.add_node("intent_recognition", intent_recognition_node)
     workflow.add_node("general_response", general_response_node)
     workflow.add_node("entity_extraction", entity_extraction_node)
@@ -42,7 +45,8 @@ def build_graph():
     workflow.add_node("answer_generation", answer_generation_node)
 
     # 边
-    workflow.add_edge(START, "intent_recognition")
+    workflow.add_edge(START, "standalone_query")
+    workflow.add_edge("standalone_query", "intent_recognition")
     workflow.add_conditional_edges(
         "intent_recognition",
         _route_by_intent,
@@ -67,6 +71,7 @@ def build_graph():
 
 _STATE_KEYS = [
     ("user_question",       "用户问题"),
+    ("search_question",     "检索问句"),
     ("intent",              "意图"),
     ("is_zhongyi_intent",   "是否中医"),
     ("user_input_symptoms", "输入·症状"),

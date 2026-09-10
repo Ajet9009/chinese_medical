@@ -11,7 +11,6 @@ import os
 import sys
 from typing import Any
 
-from dotenv import load_dotenv
 
 try:
     from .state import GraphState
@@ -19,7 +18,8 @@ except ImportError:
     from state import GraphState
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 # ============================================================
 # 结果格式化

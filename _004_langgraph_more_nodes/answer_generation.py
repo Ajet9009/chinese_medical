@@ -9,16 +9,16 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 
 try:
-    from .state import GraphState
+    from .state import GraphState, history_as_text
 except ImportError:
-    from state import GraphState
+    from state import GraphState, history_as_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 # ============================================================
 # 提示词
@@ -43,10 +43,12 @@ def _get_answer_prompt() -> str:
 def _build_prompt(state: GraphState) -> str:
     kg_context = state.get("neo4j_answer", "") or "(无图谱数据)"
     question = state.get("user_question", "")
-    return f"""## 知识图谱查询结果
+    hist = history_as_text(state)
+    hist_block = f"## 对话历史\n{hist}\n\n" if hist else ""
+    return f"""{hist_block}## 知识图谱查询结果
 {kg_context}
 
-## 用户问题
+## 当前问题
 {question}
 
 请基于以上图谱数据回答用户问题。"""
@@ -63,6 +65,7 @@ def create_llm():
         api_key=os.getenv("MODEL_API_KEY"),
         base_url=os.getenv("MODEL_BASE_URL"),
         temperature=0,
+        streaming=True,
     )
 
 

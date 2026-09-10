@@ -11,16 +11,16 @@ import os
 import re
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 
 try:
-    from .state import GraphState
+    from .state import GraphState, question_for_retrieval
 except ImportError:
-    from state import GraphState
+    from state import GraphState, question_for_retrieval
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 # ============================================================
 # 六类实体字段映射
@@ -175,7 +175,7 @@ def make_entity_extraction_node(llm):
     """构建可注入 LLM 的六类实体抽取节点。"""
 
     def entity_extraction_node(state: GraphState) -> dict[str, Any]:
-        question = str(state.get("user_question", "")).strip()
+        question = question_for_retrieval(state)
         if not question:
             raise ValueError("state.user_question 不能为空")
 
