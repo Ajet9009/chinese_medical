@@ -94,6 +94,10 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "get_graph", lambda: FakeGraph())
     monkeypatch.setattr(main, "redis_status", lambda: "ok")
 
+    from common.knowledge_service import reset_knowledge_service
+
+    reset_knowledge_service()
+
     with TestClient(main.app) as c:
         resp = c.post(
             "/auth/login",

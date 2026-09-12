@@ -419,6 +419,8 @@ class ConversationStore:
                 """,
                 (row["conversation_id"], row["created_at"]),
             ).fetchone()
+            refused = bool(details.get("refused"))
+            evidence_gap = bool(details.get("evidence_gap") or refused)
             out.append({
                 "message_id": row["message_id"],
                 "conversation_id": row["conversation_id"],
@@ -427,9 +429,20 @@ class ConversationStore:
                 "question": prev["content"] if prev else "",
                 "answer": row["answer"] or "",
                 "feedback": fb,
+                "refused": refused,
+                "evidence_gap": evidence_gap,
                 "created_at": row["created_at"],
             })
         return out
+
+    def get_feedback_item(self, message_id: str) -> dict[str, Any] | None:
+        mid = (message_id or "").strip()
+        if not mid:
+            return None
+        for item in self.list_feedbacks():
+            if item["message_id"] == mid:
+                return item
+        return None
 
     def rename(
         self,
@@ -549,6 +562,9 @@ class ConversationStore:
                     self.redis.rpush(key, *[json.dumps(x, ensure_ascii=False) for x in items])
                     self.redis.ltrim(key, -self.redis_history_max, -1)
             except Exception as exc:
+                from common.obs import degraded
+
+                degraded("redis_hydrate", exc)
                 logger.warning("Redis hydrate 失败: %s", exc)
         return items[-self.redis_history_max :]
 
@@ -560,6 +576,9 @@ class ConversationStore:
             self.redis.rpush(key, json.dumps(payload, ensure_ascii=False))
             self.redis.ltrim(key, -self.redis_history_max, -1)
         except Exception as exc:
+            from common.obs import degraded
+
+            degraded("redis_write", exc)
             logger.warning("Redis 写入失败，已落 SQLite: %s", exc)
 
     def _redis_lrange(self, conv_id: str) -> list[dict[str, str]]:
@@ -568,6 +587,9 @@ class ConversationStore:
         try:
             raw = self.redis.lrange(self._redis_key(conv_id), 0, -1) or []
         except Exception as exc:
+            from common.obs import degraded
+
+            degraded("redis_read", exc)
             logger.warning("Redis 读取失败: %s", exc)
             return []
         out: list[dict[str, str]] = []
@@ -588,6 +610,9 @@ class ConversationStore:
         try:
             self.redis.delete(self._redis_key(conv_id))
         except Exception as exc:
+            from common.obs import degraded
+
+            degraded("redis_delete", exc)
             logger.warning("Redis 删除失败: %s", exc)
 
 

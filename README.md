@@ -9,11 +9,14 @@
 ## ✨ 核心能力
 
 - **意图识别**：LLM 判断问题是否属于中医领域，自动路由
+- **知识库**：顶栏「知识库」上传方剂/本草/典籍/医案；解析、向量化后进入 FAISS+BM25 检索。科室 ACL 与版本回滚。管理员另有「知识治理」补录责任人、适用区域、有效期
+- **实体抽取**：从自然语言问题中抽取六类中医实体（症状/疾病/方剂/药材/功效/出处）
 - **实体抽取**：从自然语言问题中抽取六类中医实体（症状/疾病/方剂/药材/功效/出处）
 - **向量匹配**：FAISS + BGE-large-zh-v1.5 将口语化实体匹配到知识图谱标准实体
 - **Cypher 生成**：LLM 结合图 schema 生成查询语句，EXPLAIN 校验 + 错误自动修正
 - **知识问答**：图查询结果 → LLM 生成自然语言回答
 - **全链路追踪**：Langfuse 记录每次请求的 Trace/Span/Generation，含 token 用量、成本、TTFT
+- **评测飞轮**：黄金集 `eval/golden_qa.json`（方剂/本草/证候/文献/拒答）。管理页点踩可「标为黄金集」待标注；`python scripts/eval_golden.py` 做离线关键词命中，CI 不打线上 LLM。Redis/索引等失败走 `obs.degraded`，挂在 `/health` 与系统运行状态。不是旁路评测子系统，也没有知识自进化
 
 ---
 
@@ -96,8 +99,12 @@ common/                     公共模块
 ├── redis_client.py           Redis 连接（失败返回 None）
 ├── conversation_store.py     SQLite 会话 + Redis List/LTRIM
 ├── langfuse_manager.py       Langfuse 客户端（追踪/采样/成本）
+├── obs.py                    降级打点（内存计数，失败不抛）
+├── eval_golden.py            黄金集校验 / 离线关键词命中
 ├── sanitizer.py              PII 脱敏
 └── export_neo4j_metadata.py  导出图 schema
+eval/golden_qa.json         中医黄金集（data/ 已 gitignore）
+scripts/eval_golden.py       校验；--score-file 离线打分；--live 仅本机
 docker-compose.yml          仅 Redis（Neo4j 用本机实例）
 tests/                      单元测试
 ```
@@ -153,6 +160,9 @@ CONVERSATION_DB_PATH=data/conversations.sqlite
 REDIS_HISTORY_MAX=50
 GRAPH_HISTORY_LIMIT=6
 TOKEN_BUDGET=2000
+DOC_RAG_ENABLE=1
+DOC_SOURCE_DIR=corpus
+KNOWLEDGE_DOCS_DIR=data/docs
 
 # Langfuse（可观测性）
 LANGFUSE_SECRET_KEY=sk-lf-xxx
@@ -234,6 +244,9 @@ pytest tests/test_langfuse_integration.py -v
 # 单节点测试（每个文件有 main()）
 python -m _004_langgraph_more_nodes.intent_recognition
 python -m _004_langgraph_more_nodes.cypher_generation
+
+# 黄金集校验（不调 LLM）
+python scripts/eval_golden.py
 
 # API 调用验证
 python _000_demo/demo_api.py "四君子汤有什么功效？"

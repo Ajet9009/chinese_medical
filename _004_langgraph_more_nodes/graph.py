@@ -6,6 +6,7 @@ try:
     from .answer_generation import answer_generation_node
     from .cypher_executor import cypher_executor_node
     from .cypher_generation import cypher_generation_node
+    from .doc_retrieval import doc_retrieval_node
     from .entity_extraction import entity_extraction_node
     from .entity_normalization import entity_normalization_node
     from .general_response import general_response_node
@@ -16,6 +17,7 @@ except ImportError:
     from answer_generation import answer_generation_node
     from cypher_executor import cypher_executor_node
     from cypher_generation import cypher_generation_node
+    from doc_retrieval import doc_retrieval_node
     from entity_extraction import entity_extraction_node
     from entity_normalization import entity_normalization_node
     from general_response import general_response_node
@@ -42,6 +44,7 @@ def build_graph():
     workflow.add_node("entity_normalization", entity_normalization_node)
     workflow.add_node("cypher_generation", cypher_generation_node)
     workflow.add_node("cypher_executor", cypher_executor_node)
+    workflow.add_node("doc_retrieval", doc_retrieval_node)
     workflow.add_node("answer_generation", answer_generation_node)
 
     # 边
@@ -58,7 +61,8 @@ def build_graph():
     workflow.add_edge("entity_extraction", "entity_normalization")
     workflow.add_edge("entity_normalization", "cypher_generation")
     workflow.add_edge("cypher_generation", "cypher_executor")
-    workflow.add_edge("cypher_executor", "answer_generation")
+    workflow.add_edge("cypher_executor", "doc_retrieval")
+    workflow.add_edge("doc_retrieval", "answer_generation")
     workflow.add_edge("answer_generation", END)
     workflow.add_edge("general_response", END)
 
@@ -88,6 +92,7 @@ _STATE_KEYS = [
     ("matched_sources",     "匹配·出处"),
     ("cypher_queries",      "Cypher查询"),
     ("neo4j_answer",        "KG上下文"),
+    ("doc_context",         "文献摘录"),
     ("final_answer",        "最终回答"),
 ]
 

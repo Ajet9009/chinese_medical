@@ -38,6 +38,10 @@ def auth_client(tmp_path, monkeypatch):
     monkeypatch.setattr(deps, "get_users", lambda: users)
     monkeypatch.setattr(main, "get_users", lambda: users)
 
+    from common.knowledge_service import reset_knowledge_service
+
+    reset_knowledge_service()
+
     with TestClient(main.app) as c:
         yield c, store
 
@@ -164,6 +168,33 @@ def test_reset_password_and_logs(auth_client):
     assert "登录" in types
     assert "用户管理" in types
     assert logs["total"] >= 1
+
+
+def test_admin_upload_doc_rebuilds_index(auth_client, tmp_path, monkeypatch):
+    c, _ = auth_client
+    monkeypatch.setenv("KNOWLEDGE_DOCS_DIR", str(tmp_path / "files"))
+    monkeypatch.setenv("DOC_FAISS_INDEX_PATH", str(tmp_path / "docs.index"))
+    monkeypatch.setenv("DOC_FAISS_METADATA_PATH", str(tmp_path / "docs.json"))
+    from common.knowledge_service import reset_knowledge_service
+
+    reset_knowledge_service()
+    h = _login(c)
+    files = {"files": ("四君子汤.md", "# 四君子汤\n益气健脾".encode("utf-8"), "text/markdown")}
+    resp = c.post("/document/upload", files=files, data={"docType": "方剂"}, headers=h)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["successList"]
+    listed = c.get("/document/list", headers=h)
+    assert listed.status_code == 200
+    assert listed.json()["total"] >= 1
+    bad = c.post(
+        "/document/upload",
+        files={"files": ("../evil.md", b"x", "text/markdown")},
+        data={"docType": "其他"},
+        headers=h,
+    )
+    assert bad.status_code == 200
+    assert bad.json()["failList"]
 
 
 def test_login_rate_limit(auth_client, monkeypatch):

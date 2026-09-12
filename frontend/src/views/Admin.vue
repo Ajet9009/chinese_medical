@@ -1,7 +1,7 @@
 <template>
   <div class="admin-page">
     <h2>管理</h2>
-    <p class="hint admin-lead">反馈、Prompt 来源与图谱导入健康。仅 user / admin 两角色，不开放自行注册。</p>
+    <p class="hint admin-lead">反馈可标入黄金集回流；系统运行状态含降级打点。仅 user / admin 两角色，不开放自行注册。</p>
     <div class="tabs">
       <button
         v-for="tab in tabs"
@@ -21,6 +21,7 @@
           <option value="dislike">👎 踩</option>
         </select>
         <span class="hint">共 {{ feedbacks.total || 0 }} 条</span>
+        <span v-if="goldenHint" class="hint">{{ goldenHint }}</span>
       </div>
       <table class="tbl">
         <thead>
@@ -29,6 +30,8 @@
             <th>问句</th>
             <th>回答</th>
             <th>反馈</th>
+            <th>证据</th>
+            <th></th>
           </tr>
         </thead>
         <tbody>
@@ -41,9 +44,21 @@
                 {{ item.feedback === "like" ? "👍 赞" : "👎 踩" }}
               </span>
             </td>
+            <td>
+              <span v-if="item.evidence_gap" class="badge badge-warning">证据缺口</span>
+              <span v-else class="hint">—</span>
+            </td>
+            <td>
+              <button
+                class="btn ghost sm"
+                type="button"
+                :disabled="item.in_golden || goldenBusy === item.message_id"
+                @click="markGolden(item)"
+              >{{ item.in_golden ? "已在黄金集" : (goldenBusy === item.message_id ? "写入中…" : "标为黄金集") }}</button>
+            </td>
           </tr>
           <tr v-if="!(feedbacks.items || []).length">
-            <td colspan="4" class="hint">暂无点赞或点踩</td>
+            <td colspan="6" class="hint">暂无点赞或点踩。踩一条后可标入黄金集待标注。</td>
           </tr>
         </tbody>
       </table>
@@ -76,11 +91,26 @@
     </section>
 
     <section v-else-if="current === 'import'" class="stat-grid">
-      <div class="stat stat-accent">
+      <article
+        class="stat stat-accent stat-zoomable"
+        role="button"
+        tabindex="0"
+        title="点击放大"
+        @click="openZoom('redis')"
+        @keydown.enter.prevent="openZoom('redis')"
+      >
         <h3>Redis</h3>
         <p class="stat-val">{{ importStatus.redis || "—" }}</p>
-      </div>
-      <div class="stat stat-accent">
+        <p class="hint">会话热缓存通不通</p>
+      </article>
+      <article
+        class="stat stat-accent stat-zoomable"
+        role="button"
+        tabindex="0"
+        title="点击放大"
+        @click="openZoom('neo4j')"
+        @keydown.enter.prevent="openZoom('neo4j')"
+      >
         <h3>Neo4j</h3>
         <p class="stat-val">{{ importStatus.neo4j?.ok ? "连通" : "未连通" }}</p>
         <p v-if="importStatus.neo4j?.error" class="err">{{ importStatus.neo4j.error }}</p>
@@ -89,14 +119,104 @@
             {{ label }}：{{ n }}
           </li>
         </ul>
-      </div>
-      <div class="stat stat-accent">
+      </article>
+      <article
+        class="stat stat-accent stat-zoomable"
+        role="button"
+        tabindex="0"
+        title="点击放大"
+        @click="openZoom('faiss')"
+        @keydown.enter.prevent="openZoom('faiss')"
+      >
         <h3>FAISS</h3>
         <p class="stat-val">{{ importStatus.faiss?.index_exists ? "索引已找到" : "索引缺失" }}</p>
         <p class="hint clip">{{ importStatus.faiss?.index_path }}</p>
         <p>{{ importStatus.faiss?.metadata_exists ? "元数据已找到" : "元数据缺失" }}</p>
         <p class="hint clip">{{ importStatus.faiss?.metadata_path }}</p>
-      </div>
+      </article>
+      <article
+        class="stat stat-accent stat-zoomable"
+        role="button"
+        tabindex="0"
+        title="点击放大"
+        @click="openZoom('docs')"
+        @keydown.enter.prevent="openZoom('docs')"
+      >
+        <h3>文献 RAG</h3>
+        <p class="stat-val">{{ importStatus.docs?.index_exists ? "索引已找到" : "索引缺失" }}</p>
+        <p class="hint">{{ importStatus.docs?.enabled ? "已启用" : "已关闭" }} · {{ importStatus.docs?.chunk_count || 0 }} 块</p>
+        <p class="hint clip">{{ importStatus.docs?.source_dir }}</p>
+        <router-link class="btn sm" to="/documents" @click.stop>去知识库上传</router-link>
+        <button class="btn sm" type="button" :disabled="ingestBusy" @click.stop="ingestDocs">
+          {{ ingestBusy ? "重建中…" : "📚 重建文献索引" }}
+        </button>
+        <p v-if="ingestMsg" class="hint">{{ ingestMsg }}</p>
+      </article>
+      <article
+        class="stat stat-accent stat-zoomable"
+        role="button"
+        tabindex="0"
+        title="点击放大"
+        @click="openZoom('degraded')"
+        @keydown.enter.prevent="openZoom('degraded')"
+      >
+        <h3>降级打点</h3>
+        <p class="stat-val">{{ importStatus.degraded?.total || 0 }}</p>
+        <p class="hint">Redis / 索引失败会计数，不抛给用户</p>
+        <ul class="hint">
+          <li v-for="(n, tag) in importStatus.degraded?.byTag || {}" :key="tag">
+            {{ tag }}：{{ n }}
+          </li>
+        </ul>
+        <p v-if="!(importStatus.degraded?.total)" class="hint">暂无降级</p>
+      </article>
+      <article
+        class="stat stat-accent stat-zoomable"
+        role="button"
+        tabindex="0"
+        title="点击放大"
+        @click="openZoom('golden')"
+        @keydown.enter.prevent="openZoom('golden')"
+      >
+        <h3>黄金集</h3>
+        <p class="stat-val">{{ importStatus.golden?.total || 0 }}</p>
+        <p class="hint">已标注 {{ importStatus.golden?.labeled || 0 }} · 待标注 {{ importStatus.golden?.pending || 0 }}</p>
+        <p class="hint clip">{{ importStatus.golden?.path }}</p>
+      </article>
+    </section>
+
+    <section v-else-if="current === 'eval'" class="card">
+      <p class="hint" style="margin-top:0">
+        离线关键词命中，不跑线上 LLM。CI：<code>python scripts/eval_golden.py</code>。反馈点踩后标入待标注，不是旁路评测子系统。
+      </p>
+      <p class="hint">
+        共 {{ golden.total || 0 }} 条 · 已标注 {{ golden.labeled || 0 }} · 待标注 {{ golden.pending || 0 }}
+      </p>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>问句</th>
+            <th>类别</th>
+            <th>来源</th>
+            <th>期望关键词</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in golden.items || []" :key="item.query">
+            <td>{{ item.query }}</td>
+            <td><span class="badge badge-info">{{ item.category }}</span></td>
+            <td>
+              <span class="badge" :class="item.source === 'feedback' ? 'badge-warning' : 'badge-neutral'">
+                {{ item.source === "feedback" ? "反馈" : "种子" }}
+              </span>
+            </td>
+            <td class="clip">{{ (item.expect || []).join("、") || "待标注" }}</td>
+          </tr>
+          <tr v-if="!(golden.items || []).length">
+            <td colspan="4" class="hint">黄金集为空</td>
+          </tr>
+        </tbody>
+      </table>
     </section>
 
     <section v-else-if="current === 'logs'" class="card">
@@ -124,10 +244,11 @@
       </table>
     </section>
 
-    <section v-else class="card">
+    <section v-else-if="current === 'users'" class="card">
       <form class="user-form" @submit.prevent="createUser">
         <input class="input" v-model="newUser.username" placeholder="用户名" />
         <input class="input" v-model="newUser.password" type="password" placeholder="密码至少 6 位" />
+        <input class="input" v-model="newUser.dept" placeholder="科室（可空）" />
         <select class="select" v-model="newUser.role">
           <option value="user">user</option>
           <option value="admin">admin</option>
@@ -140,6 +261,7 @@
           <tr>
             <th>用户名</th>
             <th>角色</th>
+            <th>科室</th>
             <th>状态</th>
             <th></th>
           </tr>
@@ -152,6 +274,15 @@
                 <option value="user">user</option>
                 <option value="admin">admin</option>
               </select>
+            </td>
+            <td>
+              <input
+                class="input"
+                :value="u.dept || ''"
+                placeholder="公开"
+                style="min-width:96px"
+                @change="changeDept(u, $event.target.value)"
+              />
             </td>
             <td>
               <span class="badge" :class="u.status === 'active' ? 'badge-success' : 'badge-neutral'">
@@ -181,18 +312,80 @@
         </tbody>
       </table>
     </section>
+    <div v-if="zoomId" class="modal-bg stat-zoom-bg" @click.self="closeZoom">
+      <div class="modal stat-zoom-modal" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <span>{{ zoomTitles[zoomId] }}</span>
+          <button class="icon-btn" type="button" aria-label="关闭" @click="closeZoom">✕</button>
+        </div>
+        <div class="stat-zoom-body">
+          <template v-if="zoomId === 'redis'">
+            <p class="stat-val">{{ importStatus.redis || "—" }}</p>
+            <p class="hint">会话热缓存。ok 才能按条数裁最近对话；挂了改走 SQLite，问答不中断。</p>
+          </template>
+          <template v-else-if="zoomId === 'neo4j'">
+            <p class="stat-val">{{ importStatus.neo4j?.ok ? "连通" : "未连通" }}</p>
+            <p v-if="importStatus.neo4j?.error" class="err">{{ importStatus.neo4j.error }}</p>
+            <p class="hint">图节点库存。数字是数量，不是正确率。</p>
+            <ul class="hint stat-zoom-list">
+              <li v-for="(n, label) in importStatus.neo4j?.labels || {}" :key="label">
+                {{ label }}：{{ n }}
+              </li>
+            </ul>
+          </template>
+          <template v-else-if="zoomId === 'faiss'">
+            <p class="stat-val">{{ importStatus.faiss?.index_exists ? "索引已找到" : "索引缺失" }}</p>
+            <p class="hint">实体标准化索引（口语对齐到图谱标准名），与文献 RAG 不是同一套文件。</p>
+            <p class="hint">索引 {{ importStatus.faiss?.index_exists ? "已找到" : "缺失" }}</p>
+            <p>{{ importStatus.faiss?.index_path || "—" }}</p>
+            <p class="hint">元数据 {{ importStatus.faiss?.metadata_exists ? "已找到" : "缺失" }}</p>
+            <p>{{ importStatus.faiss?.metadata_path || "—" }}</p>
+          </template>
+          <template v-else-if="zoomId === 'docs'">
+            <p class="stat-val">{{ importStatus.docs?.index_exists ? "索引已找到" : "索引缺失" }}</p>
+            <p class="hint">{{ importStatus.docs?.enabled ? "已启用" : "已关闭" }} · {{ importStatus.docs?.chunk_count || 0 }} 块</p>
+            <p>{{ importStatus.docs?.source_dir || "—" }}</p>
+            <div class="stat-zoom-ops">
+              <router-link class="btn sm" to="/documents" @click="closeZoom">去知识库上传</router-link>
+              <button class="btn sm" type="button" :disabled="ingestBusy" @click="ingestDocs">
+                {{ ingestBusy ? "重建中…" : "📚 重建文献索引" }}
+              </button>
+            </div>
+            <p v-if="ingestMsg" class="hint">{{ ingestMsg }}</p>
+          </template>
+          <template v-else-if="zoomId === 'degraded'">
+            <p class="stat-val">{{ importStatus.degraded?.total || 0 }}</p>
+            <p class="hint">备胎路径被踩的次数。重启进程清零。不替代 Langfuse Trace。</p>
+            <ul class="hint stat-zoom-list">
+              <li v-for="(n, tag) in importStatus.degraded?.byTag || {}" :key="tag">
+                {{ tag }}：{{ n }}
+              </li>
+            </ul>
+            <p v-if="!(importStatus.degraded?.total)" class="hint">暂无降级</p>
+          </template>
+          <template v-else-if="zoomId === 'golden'">
+            <p class="stat-val">{{ importStatus.golden?.total || 0 }}</p>
+            <p class="hint">已标注 {{ importStatus.golden?.labeled || 0 }} · 待标注 {{ importStatus.golden?.pending || 0 }}</p>
+            <p>{{ importStatus.golden?.path || "—" }}</p>
+          </template>
+        </div>
+      </div>
+    </div>
     <div v-if="error" class="err">{{ error }}</div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from "vue";
+import { onMounted, onUnmounted, ref, watch } from "vue";
 import {
   adminCreateUser,
   adminDeleteUser,
   adminFeedbacks,
+  adminGolden,
   adminImportStatus,
+  adminIngestDocs,
   adminLogs,
+  adminMarkGolden,
   adminPatchUser,
   adminPrompts,
   adminResetPassword,
@@ -205,7 +398,8 @@ const auth = useAuthStore();
 const tabs = [
   { id: "feedback", label: "👍 反馈" },
   { id: "prompts", label: "📝 Prompt" },
-  { id: "import", label: "💚 导入健康" },
+  { id: "import", label: "💚 系统运行状态" },
+  { id: "eval", label: "🧪 评测" },
   { id: "users", label: "👥 用户" },
   { id: "logs", label: "📋 操作日志" },
 ];
@@ -215,11 +409,37 @@ const feedbacks = ref({ total: 0, items: [] });
 const fbFilter = ref("");
 const prompts = ref({ langfuse_enabled: false, items: [] });
 const importStatus = ref({});
+const ingestBusy = ref(false);
+const ingestMsg = ref("");
+const golden = ref({ total: 0, labeled: 0, pending: 0, items: [] });
+const goldenBusy = ref("");
+const goldenHint = ref("");
 const users = ref([]);
 const logs = ref({ total: 0, items: [] });
-const newUser = ref({ username: "", password: "", role: "user" });
+const newUser = ref({ username: "", password: "", role: "user", dept: "" });
 const userErr = ref("");
 const meId = ref(auth.userId || "");
+const zoomId = ref("");
+const zoomTitles = {
+  redis: "Redis",
+  neo4j: "Neo4j",
+  faiss: "FAISS",
+  docs: "文献 RAG",
+  degraded: "降级打点",
+  golden: "黄金集",
+};
+
+function openZoom(id) {
+  zoomId.value = id;
+}
+
+function closeZoom() {
+  zoomId.value = "";
+}
+
+function onZoomKey(e) {
+  if (e.key === "Escape") closeZoom();
+}
 
 function formatTime(iso) {
   if (!iso) return "—";
@@ -240,6 +460,39 @@ async function loadLogs() {
   logs.value = await adminLogs();
 }
 
+async function loadGolden() {
+  golden.value = await adminGolden();
+}
+
+async function markGolden(item) {
+  goldenHint.value = "";
+  goldenBusy.value = item.message_id;
+  try {
+    const data = await adminMarkGolden(item.message_id);
+    goldenHint.value = data.added
+      ? `已写入黄金集（共 ${data.total} 条）`
+      : (data.reason || "已在黄金集");
+    await loadFeedbacks();
+    await loadGolden();
+    if (importStatus.value.golden) {
+      importStatus.value = {
+        ...importStatus.value,
+        golden: {
+          ...importStatus.value.golden,
+          total: data.total,
+          pending: data.added
+            ? (importStatus.value.golden.pending || 0) + 1
+            : importStatus.value.golden.pending,
+        },
+      };
+    }
+  } catch (e) {
+    goldenHint.value = e.message || String(e);
+  } finally {
+    goldenBusy.value = "";
+  }
+}
+
 async function loadAll() {
   error.value = "";
   try {
@@ -250,10 +503,12 @@ async function loadAll() {
       id: info.id,
       username: info.username,
       role: info.role,
+      dept: info.dept || "",
     });
     await loadFeedbacks();
     prompts.value = await adminPrompts();
     importStatus.value = await adminImportStatus();
+    await loadGolden();
     await loadUsers();
     await loadLogs();
   } catch (e) {
@@ -261,14 +516,39 @@ async function loadAll() {
   }
 }
 
+async function ingestDocs() {
+  ingestMsg.value = "";
+  ingestBusy.value = true;
+  try {
+    const data = await adminIngestDocs();
+    importStatus.value = { ...importStatus.value, docs: data };
+    ingestMsg.value = `已写入 ${data.chunks} 块`;
+  } catch (e) {
+    ingestMsg.value = e.message || String(e);
+  } finally {
+    ingestBusy.value = false;
+  }
+}
+
 async function createUser() {
   userErr.value = "";
   try {
     await adminCreateUser(newUser.value);
-    newUser.value = { username: "", password: "", role: "user" };
+    newUser.value = { username: "", password: "", role: "user", dept: "" };
     await loadUsers();
   } catch (e) {
     userErr.value = e.message || String(e);
+  }
+}
+
+async function changeDept(u, dept) {
+  userErr.value = "";
+  try {
+    await adminPatchUser(u.id, { dept });
+    await loadUsers();
+  } catch (e) {
+    userErr.value = e.message || String(e);
+    await loadUsers();
   }
 }
 
@@ -317,9 +597,16 @@ async function removeUser(u) {
 }
 
 watch(current, (id) => {
+  closeZoom();
   if (id === "logs") loadLogs().catch((e) => { error.value = e.message || String(e); });
   if (id === "users") loadUsers().catch((e) => { error.value = e.message || String(e); });
+  if (id === "eval") loadGolden().catch((e) => { error.value = e.message || String(e); });
+  if (id === "import") adminImportStatus().then((d) => { importStatus.value = d; }).catch((e) => { error.value = e.message || String(e); });
 });
 
-onMounted(loadAll);
+onMounted(() => {
+  window.addEventListener("keydown", onZoomKey);
+  loadAll();
+});
+onUnmounted(() => window.removeEventListener("keydown", onZoomKey));
 </script>

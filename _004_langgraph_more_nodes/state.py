@@ -71,6 +71,16 @@ class GraphState(TypedDict, total=False):
     cypher_queries: list[str]
     # Neo4j 执行结果（去重去噪后的精简上下文）
     neo4j_answer: str
+    # W3 文档 RAG（混合检索 + CRAG）
+    doc_chunks: list[dict]
+    doc_context: str
+    refused: bool
+    crag_grade: str
+    crag_action: str
+    crag_confidence: str
+    citation_ok: bool
+    viewer_dept: str
+    viewer_role: str
 
 
 def question_for_retrieval(state: GraphState) -> str:

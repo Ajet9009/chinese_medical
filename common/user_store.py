@@ -28,9 +28,11 @@ class User:
     role: str
     status: str
     created_at: str
+    dept: str = ""
 
 
 def _row_user(row: sqlite3.Row) -> User:
+    keys = row.keys()
     return User(
         id=row["id"],
         username=row["username"],
@@ -38,6 +40,7 @@ def _row_user(row: sqlite3.Row) -> User:
         role=row["role"] or "user",
         status=row["status"] or "active",
         created_at=row["created_at"],
+        dept=row["dept"] if "dept" in keys and row["dept"] is not None else "",
     )
 
 
@@ -77,6 +80,9 @@ class UserStore:
             )
             """
         )
+        cols = [r[1] for r in self._conn.execute("PRAGMA table_info(users)").fetchall()]
+        if "dept" not in cols:
+            self._conn.execute("ALTER TABLE users ADD COLUMN dept TEXT NOT NULL DEFAULT ''")
         self._conn.commit()
 
     def seed_admin(self) -> User:
@@ -187,6 +193,16 @@ class UserStore:
         self._conn.execute("UPDATE users SET role = ? WHERE id = ?", (role, user_id))
         self._conn.commit()
         user.role = role
+        return user
+
+    def set_dept(self, user_id: str, dept: str) -> User:
+        user = self.get(user_id)
+        if user is None:
+            raise KeyError(user_id)
+        dept = (dept or "").strip()
+        self._conn.execute("UPDATE users SET dept = ? WHERE id = ?", (dept, user_id))
+        self._conn.commit()
+        user.dept = dept
         return user
 
     def delete_user(self, user_id: str, actor_id: str | None = None) -> None:

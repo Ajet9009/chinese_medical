@@ -26,13 +26,14 @@ load_app_env()
 
 from common.langfuse_manager import fetch_prompt  # noqa: E402
 
-_ANSWER_FALLBACK = """你是专业的中医知识助手。根据知识图谱查询结果回答用户问题。
+_ANSWER_FALLBACK = """你是专业的中医知识助手。根据知识图谱和文献摘录回答用户问题。
 
 ## 要求
-1. 基于提供的图谱数据回答，数据中没有的信息请说明"暂未查到"
+1. 优先依据图谱数据；文献仅作补充。两者都没有的信息必须说明未查到，不要编造
 2. 使用中医术语，如症状、方剂、药材、功效、经络、辨证论治、典籍等
-3. 回答简洁、准确，避免无关内容
-4. 只输出最终答案，不要解释推理过程"""
+3. 若使用了文献，可点明出处文件名，不要编造未给出的书名或页码
+4. 回答简洁、准确，避免无关内容
+5. 只输出最终答案，不要解释推理过程"""
 
 
 def _get_answer_prompt() -> str:
@@ -42,16 +43,20 @@ def _get_answer_prompt() -> str:
 
 def _build_prompt(state: GraphState) -> str:
     kg_context = state.get("neo4j_answer", "") or "(无图谱数据)"
+    doc_context = (state.get("doc_context") or "").strip() or "(无文献摘录)"
     question = state.get("user_question", "")
     hist = history_as_text(state)
     hist_block = f"## 对话历史\n{hist}\n\n" if hist else ""
     return f"""{hist_block}## 知识图谱查询结果
 {kg_context}
 
+## 文献摘录
+{doc_context}
+
 ## 当前问题
 {question}
 
-请基于以上图谱数据回答用户问题。"""
+请基于以上图谱数据与文献摘录回答用户问题。不要使用未出现的依据。"""
 
 # ============================================================
 # LLM 工厂
@@ -82,13 +87,47 @@ def make_answer_generation_node(llm):
         if not question:
             raise ValueError("state.user_question 不能为空")
 
+        from common.doc_rag import (
+            REFUSE_ANSWER,
+            UNCERTAIN_PREFIX,
+            kg_context_empty,
+            should_refuse,
+        )
+        from common.rag.cite import verify_citations
+
+        kg = state.get("neo4j_answer")
+        chunks = state.get("doc_chunks") or []
+        if should_refuse(
+            kg,
+            chunks,
+            crag_grade=state.get("crag_grade"),
+            crag_action=state.get("crag_action"),
+            crag_confidence=state.get("crag_confidence"),
+        ):
+            return {"final_answer": REFUSE_ANSWER, "refused": True, "citation_ok": False}
+
         prompt = _build_prompt(state)
+        kg_empty = kg_context_empty(kg)
+        ambiguous = (state.get("crag_grade") or "") == "ambiguous"
+        if ambiguous and kg_empty:
+            prompt += f"\n证据有限，请在答案开头写「{UNCERTAIN_PREFIX}」"
+
         messages = [
             SystemMessage(content=_get_answer_prompt()),
             HumanMessage(content=prompt),
         ]
         answer = str(llm.invoke(messages).content).strip()
-        return {"final_answer": answer}
+        if ambiguous and kg_empty and not answer.startswith(UNCERTAIN_PREFIX):
+            answer = UNCERTAIN_PREFIX + answer
+
+        citation_ok = True
+        if chunks:
+            checked = verify_citations(answer, chunks)
+            citation_ok = bool(checked.get("ok"))
+            if checked.get("rewrite_needed") and kg_empty:
+                return {"final_answer": REFUSE_ANSWER, "refused": True, "citation_ok": False}
+
+        return {"final_answer": answer, "refused": False, "citation_ok": citation_ok}
 
     return answer_generation_node
 

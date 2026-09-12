@@ -171,6 +171,9 @@ def compress_history(
     try:
         summary = (fn(overflow) or "").strip()
     except Exception as exc:
+        from common.obs import degraded
+
+        degraded("context_compress", exc)
         logger.warning("历史摘要失败，已按 token 保留最近轮次: %s", exc)
         return kept
     if not summary:

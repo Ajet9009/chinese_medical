@@ -28,12 +28,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from _005_fastapi.deps import get_current_user, get_users, require_admin
+from _005_fastapi.knowledge import router as knowledge_router
 from _005_fastapi.sse import is_answer_token_event, token_text_from_event
 from common.conversation_store import ConversationStore, Message, default_store
 from common.context_compressor import compress_history
@@ -53,6 +54,7 @@ _NODE_LABELS = {
     "entity_normalization": "匹配标准实体",
     "cypher_generation": "生成查询语句",
     "cypher_executor": "执行图谱查询",
+    "doc_retrieval": "检索文献",
     "answer_generation": "生成最终回答",
     "general_response": "生成回答",
 }
@@ -77,6 +79,9 @@ def _warmup_faiss() -> None:
         _get_faiss_store()
         logging.getLogger("main").info("FAISS/BGE 预热完成")
     except Exception as exc:
+        from common.obs import degraded
+
+        degraded("faiss_warmup", exc)
         logging.getLogger("main").warning("FAISS 预热失败（不影响服务，首次请求会慢）: %s", exc)
 
 
@@ -94,14 +99,19 @@ async def _lifespan(app: FastAPI):
         admin = get_users().seed_admin()
         get_store().attach_orphans(admin.id)
     except Exception as exc:
+        from common.obs import degraded
+
+        degraded("seed_admin", exc)
         logging.getLogger("main").warning("种子管理员失败: %s", exc)
     if not _testing():
         await asyncio.to_thread(_warmup_faiss)
     yield
     try:
         app.state.langfuse_mgr.flush(timeout=5.0)
-    except Exception:
-        pass
+    except Exception as exc:
+        from common.obs import degraded
+
+        degraded("langfuse_flush", exc)
 
 
 app = FastAPI(
@@ -123,6 +133,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(knowledge_router)
 
 
 class AskRequest(BaseModel):
@@ -141,6 +152,13 @@ class MatchedEntityOut(BaseModel):
     score: float
 
 
+class DocChunkOut(BaseModel):
+    doc_name: str
+    chunk_idx: int = 0
+    text: str = ""
+    score: float = 0.0
+
+
 class AskResponse(BaseModel):
     question: str
     intent: str
@@ -150,6 +168,13 @@ class AskResponse(BaseModel):
     matched_entities: dict[str, list[MatchedEntityOut]] = Field(default_factory=dict)
     cypher_queries: list[str] = Field(default_factory=list)
     kg_context: str = ""
+    doc_chunks: list[DocChunkOut] = Field(default_factory=list)
+    doc_context: str = ""
+    refused: bool = False
+    crag_grade: str = ""
+    crag_action: str = ""
+    crag_confidence: str = ""
+    citation_ok: bool = True
     answer: str = ""
     elapsed_ms: float = 0.0
     conversation_id: str = ""
@@ -210,6 +235,7 @@ class LoginOut(BaseModel):
     id: str
     username: str
     role: str
+    dept: str = ""
 
 
 class MeOut(BaseModel):
@@ -217,6 +243,7 @@ class MeOut(BaseModel):
     username: str
     role: str
     status: str
+    dept: str = ""
 
 
 class PasswordIn(BaseModel):
@@ -232,6 +259,7 @@ class AdminUserCreate(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=6, max_length=128)
     role: Literal["user", "admin"] = "user"
+    dept: str = Field("", max_length=64)
 
 
 class AdminUserOut(BaseModel):
@@ -240,11 +268,17 @@ class AdminUserOut(BaseModel):
     role: str
     status: str
     created_at: str
+    dept: str = ""
 
 
 class AdminUserPatch(BaseModel):
     status: Literal["active", "inactive"] | None = None
     role: Literal["user", "admin"] | None = None
+    dept: str | None = None
+
+
+class MePatch(BaseModel):
+    dept: str = Field("", max_length=64)
 
 
 def _build_response(
@@ -270,6 +304,18 @@ def _build_response(
     for k in user_keys:
         user_entities[k] = final_state.get(k, []) or []
 
+    raw_docs = final_state.get("doc_chunks") or []
+    doc_chunks = [
+        DocChunkOut(
+            doc_name=str(d.get("doc_name") or ""),
+            chunk_idx=int(d.get("chunk_idx") or 0),
+            text=str(d.get("text") or "")[:400],
+            score=float(d.get("score") or 0.0),
+        )
+        for d in raw_docs
+        if isinstance(d, dict)
+    ]
+
     return AskResponse(
         question=question,
         intent=final_state.get("intent", "general"),
@@ -279,6 +325,13 @@ def _build_response(
         matched_entities=matched,
         cypher_queries=final_state.get("cypher_queries", []) or [],
         kg_context=final_state.get("neo4j_answer", "") or "",
+        doc_chunks=doc_chunks,
+        doc_context=final_state.get("doc_context", "") or "",
+        refused=bool(final_state.get("refused")),
+        crag_grade=str(final_state.get("crag_grade") or ""),
+        crag_action=str(final_state.get("crag_action") or ""),
+        crag_confidence=str(final_state.get("crag_confidence") or ""),
+        citation_ok=final_state.get("citation_ok", True) is not False,
         answer=final_state.get("final_answer", "") or "",
         elapsed_ms=round(elapsed_ms, 1),
         conversation_id=conversation_id,
@@ -296,6 +349,13 @@ def _assistant_details(resp: AskResponse) -> dict[str, Any]:
         },
         "cypher_queries": resp.cypher_queries,
         "search_question": resp.search_question,
+        "doc_chunks": [c.model_dump() for c in resp.doc_chunks],
+        "refused": resp.refused,
+        "evidence_gap": bool(resp.refused),
+        "crag_grade": resp.crag_grade,
+        "crag_action": resp.crag_action,
+        "crag_confidence": resp.crag_confidence,
+        "citation_ok": resp.citation_ok,
     }
 
 
@@ -350,13 +410,23 @@ def _save_assistant(conversation_id: str, resp: AskResponse) -> None:
             details=_assistant_details(resp),
         )
     except Exception as exc:
+        from common.obs import degraded
+
+        degraded("save_assistant", exc)
         logging.getLogger("main").warning("写入助手消息失败: %s", exc)
 
 
-def _initial_state(question: str, history: list[dict[str, str]]) -> dict[str, Any]:
+def _initial_state(
+    question: str,
+    history: list[dict[str, str]],
+    viewer_dept: str = "",
+    viewer_role: str = "user",
+) -> dict[str, Any]:
     return {
         "user_question": question,
         "messages": history,
+        "viewer_dept": viewer_dept,
+        "viewer_role": viewer_role,
     }
 
 
@@ -374,7 +444,9 @@ def _make_handler(request: Request, trace_name: str, session_id: str, user_id: s
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "redis": redis_status()}
+    from common.obs import snapshot as obs_snapshot
+
+    return {"status": "ok", "redis": redis_status(), "degraded": obs_snapshot()}
 
 
 def _admin_user_out(u: User) -> AdminUserOut:
@@ -384,6 +456,7 @@ def _admin_user_out(u: User) -> AdminUserOut:
         role=u.role,
         status=u.status,
         created_at=u.created_at,
+        dept=getattr(u, "dept", "") or "",
     )
 
 
@@ -400,12 +473,37 @@ def login(payload: LoginIn, request: Request):
         raise HTTPException(status_code=401, detail="用户名或密码错误")
     get_users().write_log(user.username, "登录", "用户登录")
     token = create_access_token(user.id, user.username, user.role)
-    return LoginOut(token=token, id=user.id, username=user.username, role=user.role)
+    return LoginOut(
+        token=token,
+        id=user.id,
+        username=user.username,
+        role=user.role,
+        dept=getattr(user, "dept", "") or "",
+    )
 
 
 @app.get("/auth/me", response_model=MeOut)
 def auth_me(user: User = Depends(get_current_user)):
-    return MeOut(id=user.id, username=user.username, role=user.role, status=user.status)
+    return MeOut(
+        id=user.id,
+        username=user.username,
+        role=user.role,
+        status=user.status,
+        dept=getattr(user, "dept", "") or "",
+    )
+
+
+@app.patch("/auth/me", response_model=MeOut)
+def auth_patch_me(payload: MePatch, user: User = Depends(get_current_user)):
+    updated = get_users().set_dept(user.id, payload.dept)
+    get_users().write_log(user.username, "改资料", f"科室={updated.dept or '公开'}")
+    return MeOut(
+        id=updated.id,
+        username=updated.username,
+        role=updated.role,
+        status=updated.status,
+        dept=updated.dept,
+    )
 
 
 @app.post("/auth/password")
@@ -545,7 +643,12 @@ def ask(payload: AskRequest, request: Request, user: User = Depends(get_current_
     conv_id, history = _prepare_turn(payload, user)
     handler = _make_handler(request, "POST:/ask", conv_id, user.id)
     config = {"callbacks": [handler]} if handler else None
-    initial = _initial_state(payload.question, history)
+    initial = _initial_state(
+        payload.question,
+        history,
+        viewer_dept=getattr(user, "dept", "") or "",
+        viewer_role=user.role,
+    )
     try:
         graph = get_graph()
         final_state = graph.invoke(initial, config=config) if config else graph.invoke(initial)
@@ -562,7 +665,12 @@ async def ask_stream(payload: AskRequest, request: Request, user: User = Depends
     conv_id, history = _prepare_turn(payload, user)
     handler = _make_handler(request, "POST:/ask/stream", conv_id, user.id)
     config = {"callbacks": [handler]} if handler else None
-    initial = _initial_state(payload.question, history)
+    initial = _initial_state(
+        payload.question,
+        history,
+        viewer_dept=getattr(user, "dept", "") or "",
+        viewer_role=user.role,
+    )
 
     async def event_stream() -> AsyncGenerator[str, None]:
         t0 = time.time()
@@ -672,11 +780,52 @@ def admin_feedbacks(
     feedback: str = "",
     user: User = Depends(require_admin),
 ):
+    from common.eval_golden import load_golden
+
     items = get_store().list_feedbacks(feedback)
     users = {u.id: u.username for u in get_users().list_users()}
+    golden_queries = {str(it.get("query") or "").strip() for it in load_golden()}
     for item in items:
         item["username"] = users.get(item.get("user_id") or "", "")
+        item["in_golden"] = str(item.get("question") or "").strip() in golden_queries
     return {"total": len(items), "items": items}
+
+
+@app.get("/admin/golden")
+def admin_golden(_admin: User = Depends(require_admin)):
+    from common.eval_golden import golden_summary, load_golden
+
+    items = load_golden()
+    summary = golden_summary()
+    summary["items"] = [
+        {
+            "query": it.get("query") or "",
+            "category": it.get("category") or "",
+            "source": it.get("source") or "seed",
+            "expect": it.get("expect") or [],
+        }
+        for it in items
+    ]
+    return summary
+
+
+@app.post("/admin/feedbacks/{message_id}/golden")
+def admin_mark_golden(message_id: str, user: User = Depends(require_admin)):
+    from common.eval_golden import add_from_feedback
+
+    item = get_store().get_feedback_item(message_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="反馈不存在")
+    question = str(item.get("question") or "").strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="找不到对应问句")
+    result = add_from_feedback(question)
+    get_users().write_log(
+        user.username,
+        "评测",
+        f"{'写入' if result.get('added') else '跳过'}黄金集 {question[:40]}",
+    )
+    return result
 
 
 @app.get("/admin/prompts")
@@ -694,6 +843,64 @@ def admin_prompts(_admin: User = Depends(require_admin)):
             source = "fallback" if text == sentinel else "langfuse"
         items.append({"name": name, "label": label, "source": source})
     return {"langfuse_enabled": enabled, "items": items}
+
+
+def _doc_index_status() -> dict:
+    from common.doc_store import default_doc_paths, default_source_dir
+
+    index, meta = default_doc_paths()
+    chunks = 0
+    if meta.is_file():
+        try:
+            import json
+
+            chunks = len(json.loads(meta.read_text(encoding="utf-8")))
+        except Exception as exc:
+            from common.obs import degraded
+
+            degraded("doc_index", exc)
+            chunks = 0
+    return {
+        "enabled": os.getenv("DOC_RAG_ENABLE", "1").strip().lower() not in ("0", "false", "no"),
+        "index_path": str(index),
+        "index_exists": index.is_file(),
+        "metadata_path": str(meta),
+        "metadata_exists": meta.is_file(),
+        "chunk_count": chunks,
+        "source_dir": str(os.getenv("KNOWLEDGE_DOCS_DIR") or default_source_dir()),
+    }
+
+
+@app.post("/admin/docs/ingest")
+def admin_ingest_docs(user: User = Depends(require_admin)):
+    from common.doc_store import reset_doc_store
+    from common.knowledge_service import get_knowledge_service
+
+    try:
+        n = get_knowledge_service().rebuild_index()
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    reset_doc_store()
+    get_users().write_log(user.username, "用户管理", f"重建文献索引 {n} 块")
+    return {"chunks": n, **_doc_index_status()}
+
+
+@app.post("/admin/docs/upload")
+async def admin_upload_doc(
+    file: UploadFile = File(...),
+    user: User = Depends(require_admin),
+):
+    from common.doc_store import ingest_directory, reset_doc_store, save_uploaded_file
+
+    data = await file.read()
+    try:
+        path = save_uploaded_file(file.filename or "", data)
+        n = ingest_directory()
+    except (FileNotFoundError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    reset_doc_store()
+    get_users().write_log(user.username, "用户管理", f"上传文献 {path.name} 并重建 {n} 块")
+    return {"filename": path.name, "chunks": n, **_doc_index_status()}
 
 
 @app.get("/admin/import-status")
@@ -716,7 +923,13 @@ def admin_import_status(user: User = Depends(require_admin)):
         finally:
             mgr.close()
     except Exception as exc:
+        from common.obs import degraded
+
+        degraded("neo4j", exc)
         neo4j_error = str(exc)
+    from common.eval_golden import golden_summary
+    from common.obs import snapshot as obs_snapshot
+
     return {
         "redis": redis_status(),
         "neo4j": {"ok": neo4j_ok, "error": neo4j_error, "labels": labels},
@@ -726,6 +939,9 @@ def admin_import_status(user: User = Depends(require_admin)):
             "metadata_path": faiss_meta,
             "metadata_exists": bool(faiss_meta and os.path.isfile(faiss_meta)),
         },
+        "docs": _doc_index_status(),
+        "degraded": obs_snapshot(),
+        "golden": golden_summary(),
     }
 
 
@@ -740,6 +956,8 @@ def admin_create_user(payload: AdminUserCreate, user: User = Depends(require_adm
         created = get_users().create(payload.username, payload.password, role=payload.role)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    if payload.dept:
+        created = get_users().set_dept(created.id, payload.dept)
     get_users().write_log(user.username, "用户管理", f"新建用户 {created.username}")
     return _admin_user_out(created)
 
@@ -762,6 +980,9 @@ def admin_patch_user(
         if payload.role is not None:
             target = store.set_role(user_id, payload.role, actor_id=user.id)
             notes.append(f"角色={payload.role}")
+        if payload.dept is not None:
+            target = store.set_dept(user_id, payload.dept)
+            notes.append(f"科室={payload.dept or '公开'}")
     except KeyError:
         raise HTTPException(status_code=404, detail="用户不存在")
     except ValueError as exc:

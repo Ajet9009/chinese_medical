@@ -43,6 +43,9 @@ def get_redis():
         _client = client
         return _client
     except Exception as exc:
+        from common.obs import degraded
+
+        degraded("redis", exc)
         logger.warning("Redis 不可用，会话热路径降级为 SQLite: %s", exc)
         _disabled = True
         return None
@@ -55,5 +58,8 @@ def redis_status() -> str:
     try:
         client.ping()
         return "ok"
-    except Exception:
+    except Exception as exc:
+        from common.obs import degraded
+
+        degraded("redis", exc)
         return "down"

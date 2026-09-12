@@ -5,6 +5,8 @@ import AppLayout from "./views/AppLayout.vue";
 import Chat from "./views/Chat.vue";
 import Admin from "./views/Admin.vue";
 import Profile from "./views/Profile.vue";
+import Documents from "./views/Documents.vue";
+import KnowledgeGovernance from "./views/KnowledgeGovernance.vue";
 
 const router = createRouter({
   history: createWebHistory(),
@@ -16,6 +18,13 @@ const router = createRouter({
       children: [
         { path: "", redirect: "/chat" },
         { path: "chat", name: "chat", component: Chat },
+        { path: "documents", name: "documents", component: Documents },
+        {
+          path: "knowledge-governance",
+          name: "knowledge-governance",
+          component: KnowledgeGovernance,
+          meta: { admin: true },
+        },
         { path: "profile", name: "profile", component: Profile },
         { path: "admin", name: "admin", component: Admin, meta: { admin: true } },
       ],

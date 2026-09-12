@@ -16,5 +16,9 @@ httpx
 redis
 pytest
 streamlit
+jieba
+rank-bm25
+python-multipart
+pypdf
 PyJWT
 bcrypt

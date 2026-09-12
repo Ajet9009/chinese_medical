@@ -150,6 +150,17 @@
                 <div>意图：{{ m.details.is_zhongyi_intent ? "中医" : "普通" }} · {{ m.details.intent_reason }}</div>
                 <div v-if="m.details.search_question">检索问句：{{ m.details.search_question }}</div>
                 <div v-if="matchedLine(m.details)">实体：{{ matchedLine(m.details) }}</div>
+                <div v-if="m.details.refused">拒答：图谱与文献均无依据</div>
+                <div v-if="m.details.crag_grade">
+                  文献护栏：{{ m.details.crag_grade }}
+                  <template v-if="m.details.crag_action"> · {{ m.details.crag_action }}</template>
+                  <template v-if="m.details.crag_confidence"> · {{ m.details.crag_confidence }}</template>
+                  <template v-if="m.details.citation_ok === false"> · 引用未通过</template>
+                </div>
+                <div v-if="(m.details.doc_chunks || []).length" class="src-head">文献</div>
+                <div v-for="(d, k) in (m.details.doc_chunks || [])" :key="'d'+k">
+                  {{ d.doc_name }}#{{ d.chunk_idx }}（{{ Number(d.score || 0).toFixed(2) }}）{{ d.text }}
+                </div>
                 <pre
                   v-for="(q, k) in (m.details.cypher_queries || [])"
                   :key="k"
@@ -278,6 +289,10 @@ function hasDetails(d) {
   return Boolean(
     d.intent_reason ||
       d.search_question ||
+      d.refused ||
+      d.crag_grade ||
+      d.citation_ok === false ||
+      (d.doc_chunks && d.doc_chunks.length) ||
       (d.cypher_queries && d.cypher_queries.length) ||
       matchedLine(d)
   );
@@ -538,6 +553,12 @@ async function send(text, opts = {}) {
             matched_entities: data.matched_entities,
             cypher_queries: data.cypher_queries,
             search_question: data.search_question,
+            doc_chunks: data.doc_chunks || [],
+            refused: Boolean(data.refused),
+            crag_grade: data.crag_grade || "",
+            crag_action: data.crag_action || "",
+            crag_confidence: data.crag_confidence || "",
+            citation_ok: data.citation_ok !== false,
           };
         } else if (event === "error") {
           ai.streaming = false;

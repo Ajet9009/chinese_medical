@@ -105,9 +105,19 @@ def test_delete_messages_rebuilds_redis(store):
 def test_favorites_and_feedback(store):
     s, _ = store
     conv = s.create("点赞")
-    msg = s.add_message(conv.id, "assistant", "益气健脾", details={"elapsed_ms": 1})
-    patched = s.patch_message_details(conv.id, msg.id, {"feedback": "like"})
-    assert patched.details["feedback"] == "like"
+    s.add_message(conv.id, "user", "四君子汤功效")
+    msg = s.add_message(
+        conv.id,
+        "assistant",
+        "益气健脾",
+        details={"elapsed_ms": 1, "refused": True},
+    )
+    patched = s.patch_message_details(conv.id, msg.id, {"feedback": "dislike"})
+    assert patched.details["feedback"] == "dislike"
+    items = s.list_feedbacks()
+    assert items[0]["question"] == "四君子汤功效"
+    assert items[0]["evidence_gap"] is True
+    assert s.get_feedback_item(msg.id)["message_id"] == msg.id
     fav = s.add_favorite("四君子汤功效", "益气健脾")
     assert s.list_favorites(keyword="君子")[0].id == fav.id
     s.delete_favorite(fav.id)

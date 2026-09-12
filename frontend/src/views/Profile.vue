@@ -9,6 +9,14 @@
           {{ info.status === "inactive" ? "禁用" : "可用" }}
         </span>
       </p>
+      <form class="dept-form" @submit.prevent="saveDept">
+        <div class="field">
+          <label class="field-label">科室</label>
+          <input class="input" v-model="dept" placeholder="空=不限科室（公开文献均可见）" />
+        </div>
+        <button class="btn ghost" type="submit" :disabled="deptBusy">保存科室</button>
+      </form>
+      <p class="hint">科室用于知识库 ACL：文献限定某科室时，仅该科室医师与管理员可见。</p>
       <form @submit.prevent="onSubmit">
         <div class="field">
           <label class="field-label">原密码</label>
@@ -25,6 +33,7 @@
         <button class="btn" type="submit" :disabled="busy">🔑 修改密码</button>
       </form>
       <p v-if="ok" class="hint">密码已更新，下次请用新密码登录。</p>
+      <p v-if="deptOk" class="hint">{{ deptOk }}</p>
       <p v-if="error" class="err">{{ error }}</p>
     </section>
   </div>
@@ -32,17 +41,20 @@
 
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import { changePassword, me } from "../api.js";
+import { changePassword, me, patchMe } from "../api.js";
 import { useAuthStore } from "../stores/auth.js";
 
 const auth = useAuthStore();
-const info = ref({ username: "", role: "", status: "active" });
+const info = ref({ username: "", role: "", status: "active", dept: "" });
+const dept = ref("");
 const oldPassword = ref("");
 const newPassword = ref("");
 const confirmPassword = ref("");
 const busy = ref(false);
+const deptBusy = ref(false);
 const error = ref("");
 const ok = ref(false);
+const deptOk = ref("");
 
 const roleLabel = computed(() =>
   (info.value.role || auth.role) === "admin" ? "管理员" : "医师"
@@ -52,16 +64,40 @@ onMounted(async () => {
   try {
     const data = await me();
     info.value = data;
+    dept.value = data.dept || "";
     auth.setSession({
       token: auth.token,
       id: data.id,
       username: data.username,
       role: data.role,
+      dept: data.dept || "",
     });
   } catch (e) {
     error.value = e.message || String(e);
   }
 });
+
+async function saveDept() {
+  error.value = "";
+  deptOk.value = "";
+  deptBusy.value = true;
+  try {
+    const data = await patchMe(dept.value);
+    info.value = data;
+    auth.setSession({
+      token: auth.token,
+      id: data.id,
+      username: data.username,
+      role: data.role,
+      dept: data.dept || "",
+    });
+    deptOk.value = data.dept ? `科室已设为 ${data.dept}` : "科室已清空（可见公开文献）";
+  } catch (e) {
+    error.value = e.message || String(e);
+  } finally {
+    deptBusy.value = false;
+  }
+}
 
 async function onSubmit() {
   error.value = "";

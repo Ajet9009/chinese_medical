@@ -194,7 +194,10 @@ def _validate_and_fix(llm, cypher: str, schema_meta: dict) -> str | None:
                 # 去掉 markdown 代码块包裹
                 if cypher.startswith("cypher"):
                     cypher = cypher[6:].strip()
-            except Exception:
+            except Exception as exc:
+                from common.obs import degraded
+
+                degraded("cypher_repair", exc)
                 break
         return None  # 修正失败
     finally:

@@ -7,6 +7,8 @@
       </div>
       <nav class="auth-nav">
         <router-link class="nav-pill" to="/chat">💬 问答</router-link>
+        <router-link class="nav-pill" to="/documents">📚 知识库</router-link>
+        <router-link v-if="auth.isAdmin" class="nav-pill" to="/knowledge-governance">🧭 知识治理</router-link>
         <router-link v-if="auth.isAdmin" class="nav-pill" to="/admin">⚙️ 管理</router-link>
       </nav>
       <div class="auth-user">
