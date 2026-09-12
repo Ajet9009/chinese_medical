@@ -1,0 +1,109 @@
+[
+  {
+    "query": "四君子汤有什么功效？",
+    "expect": [
+      "益气",
+      "健脾"
+    ],
+    "category": "方剂",
+    "source": "seed",
+    "relevant_docs": [
+      "sijunzi.md"
+    ]
+  },
+  {
+    "query": "四君子汤由哪些药组成？",
+    "expect": [
+      "人参",
+      "白术",
+      "茯苓",
+      "甘草"
+    ],
+    "category": "方剂",
+    "source": "seed",
+    "relevant_docs": [
+      "sijunzi.md"
+    ]
+  },
+  {
+    "query": "人参常见于哪些方剂？",
+    "expect": [
+      "人参"
+    ],
+    "category": "本草",
+    "source": "seed"
+  },
+  {
+    "query": "黄芪有什么功效？",
+    "expect": [
+      "黄芪"
+    ],
+    "category": "本草",
+    "source": "seed"
+  },
+  {
+    "query": "小柴胡汤主治什么？",
+    "expect": [
+      "少阳",
+      "往来寒热"
+    ],
+    "category": "文献",
+    "source": "seed",
+    "relevant_docs": [
+      "xiaochaihu.md"
+    ]
+  },
+  {
+    "query": "小柴胡汤的组成有哪些？",
+    "expect": [
+      "柴胡",
+      "黄芩"
+    ],
+    "category": "文献",
+    "source": "seed",
+    "relevant_docs": [
+      "xiaochaihu.md"
+    ]
+  },
+  {
+    "query": "往来寒热属于什么证？",
+    "expect": [
+      "少阳"
+    ],
+    "category": "证候",
+    "source": "seed",
+    "relevant_docs": [
+      "xiaochaihu.md"
+    ]
+  },
+  {
+    "query": "什么是少阳证？",
+    "expect": [
+      "少阳"
+    ],
+    "category": "证候",
+    "source": "seed",
+    "relevant_docs": [
+      "xiaochaihu.md"
+    ]
+  },
+  {
+    "query": "桂枝汤和四君子汤有什么不同？",
+    "expect": [
+      "桂枝汤"
+    ],
+    "category": "文献",
+    "source": "seed",
+    "relevant_docs": [
+      "xiaochaihu.md"
+    ]
+  },
+  {
+    "query": "今天上证指数多少？",
+    "expect": [
+      "未查到"
+    ],
+    "category": "拒答",
+    "source": "seed"
+  }
+]

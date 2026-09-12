@@ -40,8 +40,15 @@ KG_ENTITY_TYPE_NAMES = frozenset(KG_ENTITY_TYPES.keys())
 KG_RELATION_TYPE_NAMES = frozenset(KG_RELATION_TYPES.keys())
 
 
+class ChatMessage(TypedDict):
+    role: Literal["user", "assistant"]
+    content: str
+
+
 class GraphState(TypedDict, total=False):
     user_question: str
+    search_question: str
+    messages: list[ChatMessage]
     intent: Literal["tcm", "general"]
     intent_reason: str
     is_zhongyi_intent: bool
@@ -66,4 +73,30 @@ class GraphState(TypedDict, total=False):
     cypher_retry_count: int
     # Neo4j 执行结果（去重去噪后的精简上下文）
     neo4j_answer: str
+    # W3 文档 RAG（混合检索 + CRAG）
+    doc_chunks: list[dict]
+    doc_context: str
+    refused: bool
+    crag_grade: str
+    crag_action: str
+    crag_confidence: str
+    citation_ok: bool
+    viewer_dept: str
+    viewer_role: str
+
+
+def question_for_retrieval(state: GraphState) -> str:
+    """检索/抽取/Cypher 用消解后的独立问句，没有则用原问题。"""
+    return str(state.get("search_question") or state.get("user_question") or "").strip()
+
+
+def history_as_text(state: GraphState) -> str:
+    msgs = list(state.get("messages") or [])
+    if not msgs:
+        return ""
+    lines: list[str] = []
+    for item in msgs:
+        role = "用户" if item.get("role") == "user" else "助手"
+        lines.append(f"{role}：{item.get('content', '')}")
+    return "\n".join(lines)
 

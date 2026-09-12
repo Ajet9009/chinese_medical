@@ -38,6 +38,11 @@ streamlit_check.txt
 .tmp_agent/
 _tmp*
 
+# 前端
+node_modules/
+frontend/dist/
+.deps/
+
 # 系统文件
 .DS_Store
 Thumbs.db

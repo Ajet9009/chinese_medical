@@ -11,14 +11,14 @@ from __future__ import annotations
 import os
 import re
 
-# 中国手机号：1 开头，3-9 第二位，共 11 位
-_PHONE_RE = re.compile(r"\b1[3-9]\d{9}\b")
+# 中国手机号：1 开头，第二位 3-9，共 11 位（不用 \b，避免中文与数字之间无边界）
+_PHONE_RE = re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)")
 
 # 身份证号：18 位（最后一位可能 X）或 15 位
-_ID_RE = re.compile(r"\b\d{15}(?:\d{2}[0-9Xx])?\b")
+_ID_RE = re.compile(r"(?<!\d)\d{15}(?:\d{2}[0-9Xx])?(?!\d)")
 
-# 邮箱
-_EMAIL_RE = re.compile(r"\b[\w.\-+]+@[\w\-]+(?:\.[\w\-]+)+\b")
+# 邮箱（ASCII，避免 \w 把中文算进本地部分）
+_EMAIL_RE = re.compile(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
 
 
 def _should_skip() -> bool:

@@ -6,19 +6,23 @@ try:
     from .answer_generation import answer_generation_node
     from .cypher_executor import cypher_executor_node
     from .cypher_generation import cypher_generation_node
+    from .doc_retrieval import doc_retrieval_node
     from .entity_extraction import entity_extraction_node
     from .entity_normalization import entity_normalization_node
     from .general_response import general_response_node
     from .intent_recognition import intent_recognition_node
+    from .standalone_query import standalone_query_node
     from .state import GraphState
 except ImportError:
     from answer_generation import answer_generation_node
     from cypher_executor import cypher_executor_node
     from cypher_generation import cypher_generation_node
+    from doc_retrieval import doc_retrieval_node
     from entity_extraction import entity_extraction_node
     from entity_normalization import entity_normalization_node
     from general_response import general_response_node
     from intent_recognition import intent_recognition_node
+    from standalone_query import standalone_query_node
     from state import GraphState
 
 
@@ -33,16 +37,19 @@ def build_graph():
     workflow = StateGraph(GraphState)
 
     # 节点注册
+    workflow.add_node("standalone_query", standalone_query_node)
     workflow.add_node("intent_recognition", intent_recognition_node)
     workflow.add_node("general_response", general_response_node)
     workflow.add_node("entity_extraction", entity_extraction_node)
     workflow.add_node("entity_normalization", entity_normalization_node)
     workflow.add_node("cypher_generation", cypher_generation_node)
     workflow.add_node("cypher_executor", cypher_executor_node)
+    workflow.add_node("doc_retrieval", doc_retrieval_node)
     workflow.add_node("answer_generation", answer_generation_node)
 
     # 边
-    workflow.add_edge(START, "intent_recognition")
+    workflow.add_edge(START, "standalone_query")
+    workflow.add_edge("standalone_query", "intent_recognition")
     workflow.add_conditional_edges(
         "intent_recognition",
         _route_by_intent,
@@ -54,7 +61,8 @@ def build_graph():
     workflow.add_edge("entity_extraction", "entity_normalization")
     workflow.add_edge("entity_normalization", "cypher_generation")
     workflow.add_edge("cypher_generation", "cypher_executor")
-    workflow.add_edge("cypher_executor", "answer_generation")
+    workflow.add_edge("cypher_executor", "doc_retrieval")
+    workflow.add_edge("doc_retrieval", "answer_generation")
     workflow.add_edge("answer_generation", END)
     workflow.add_edge("general_response", END)
 
@@ -67,6 +75,7 @@ def build_graph():
 
 _STATE_KEYS = [
     ("user_question",       "用户问题"),
+    ("search_question",     "检索问句"),
     ("intent",              "意图"),
     ("is_zhongyi_intent",   "是否中医"),
     ("user_input_symptoms", "输入·症状"),
@@ -83,6 +92,7 @@ _STATE_KEYS = [
     ("matched_sources",     "匹配·出处"),
     ("cypher_queries",      "Cypher查询"),
     ("neo4j_answer",        "KG上下文"),
+    ("doc_context",         "文献摘录"),
     ("final_answer",        "最终回答"),
 ]
 

@@ -11,17 +11,17 @@ import os
 import re
 from typing import Any, Literal
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 
 try:
-    from .state import GraphState, KG_ENTITY_TYPES, KG_RELATION_TYPES
+    from .state import GraphState, KG_ENTITY_TYPES, KG_RELATION_TYPES, question_for_retrieval
 except ImportError:
-    from state import GraphState, KG_ENTITY_TYPES, KG_RELATION_TYPES
+    from state import GraphState, KG_ENTITY_TYPES, KG_RELATION_TYPES, question_for_retrieval
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 # ============================================================
 # 意图识别提示词（包含知识图谱实体/关系类型说明）
@@ -151,7 +151,7 @@ def make_intent_recognition_node(llm):
     """构建可注入 LLM 的意图识别节点（测试时注入假 LLM）。"""
 
     def intent_recognition_node(state: GraphState) -> dict[str, Any]:
-        question = str(state.get("user_question", "")).strip()
+        question = question_for_retrieval(state)
         if not question:
             raise ValueError("state.user_question 不能为空")
 

@@ -9,7 +9,6 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from dotenv import load_dotenv
 
 try:
     from .state import GraphState, MatchedEntity
@@ -17,7 +16,8 @@ except ImportError:
     from state import GraphState, MatchedEntity
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 # ============================================================
 # 六类映射：user_input_* → matched_* → KG 类型

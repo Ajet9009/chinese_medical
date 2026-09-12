@@ -12,16 +12,16 @@ import re
 import time
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 
 try:
-    from .state import GraphState
+    from .state import GraphState, question_for_retrieval
 except ImportError:
-    from state import GraphState
+    from state import GraphState, question_for_retrieval
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 MAX_RETRIES = 3  # 每条 Cypher 最多校验重试次数
 
@@ -110,7 +110,7 @@ def _build_prompt(state: GraphState, schema_meta: dict) -> str:
 {matched}
 
 ## 用户问题
-{state.get('user_question', '')}
+{question_for_retrieval(state)}
 
 请生成 Cypher 查询语句（JSON 数组格式）。"""
 
@@ -199,7 +199,10 @@ def _validate_and_fix(llm, cypher: str, schema_meta: dict) -> tuple[str | None, 
                 # 去掉 markdown 代码块包裹
                 if cypher.startswith("cypher"):
                     cypher = cypher[6:].strip()
-            except Exception:
+            except Exception as exc:
+                from common.obs import degraded
+
+                degraded("cypher_repair", exc)
                 break
         return None, retry_count  # 修正失败
     finally:

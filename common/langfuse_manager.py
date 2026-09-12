@@ -255,10 +255,16 @@ class LangfuseManager:
                         host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
                     )
                     logger.info("Langfuse 客户端已初始化 (host=%s)", os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"))
-            except ImportError:
+            except ImportError as exc:
+                from common.obs import degraded
+
+                degraded("langfuse_init", exc)
                 logger.warning("langfuse 包未安装，已禁用 tracing。pip install langfuse")
                 self._enabled = False
             except Exception as exc:
+                from common.obs import degraded
+
+                degraded("langfuse_init", exc)
                 logger.warning("Langfuse 初始化失败: %s，已禁用 tracing。", exc)
                 self._enabled = False
 
@@ -355,6 +361,9 @@ class LangfuseManager:
             return handler
 
         except Exception as exc:
+            from common.obs import degraded
+
+            degraded("langfuse_handler", exc)
             logger.warning("创建 Langfuse handler 失败: %s", exc)
             return None
 
@@ -416,6 +425,9 @@ class LangfuseManager:
             self._client.flush()
             logger.info("Langfuse flush 完成")
         except Exception as exc:
+            from common.obs import degraded
+
+            degraded("langfuse_flush", exc)
             logger.warning("Langfuse flush 异常: %s", exc)
 
     def get_prompt(self, name: str, fallback: str, label: str = "production") -> str:

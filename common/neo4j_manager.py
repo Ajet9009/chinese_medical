@@ -24,8 +24,9 @@ import os
 import time
 from pathlib import Path
 
-from dotenv import load_dotenv
 from neo4j import GraphDatabase
+
+from common.env_loader import load_app_env
 
 # 允许的实体类型（节点 Label）与关系类型——白名单，防 Cypher 注入
 ALLOWED_LABELS = frozenset(
@@ -58,9 +59,12 @@ log = logging.getLogger("neo4j_manager")
 
 
 def _load_env(env_path: Path | None = None) -> None:
-    """加载 common/.env（相对本文件定位，保证从任何 cwd 调用都生效）。"""
-    path = env_path or (Path(__file__).resolve().parent / ".env")
-    load_dotenv(path)
+    """加载 common/.env 与仓库根 .env（根目录覆盖）。"""
+    if env_path is not None:
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+        return
+    load_app_env()
 
 
 def _clean_attributes(attributes) -> dict | None:

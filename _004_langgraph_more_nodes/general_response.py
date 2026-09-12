@@ -9,16 +9,16 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 
 try:
-    from .state import GraphState
+    from .state import GraphState, history_as_text
 except ImportError:
-    from state import GraphState
+    from state import GraphState, history_as_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT, "common", ".env"))
+from common.env_loader import load_app_env  # noqa: E402
+load_app_env()
 
 # ============================================================
 # 提示词
@@ -53,6 +53,7 @@ def create_llm():
         api_key=os.getenv("MODEL_API_KEY"),
         base_url=os.getenv("MODEL_BASE_URL"),
         temperature=0,
+        streaming=True,
     )
 
 
@@ -69,9 +70,13 @@ def make_general_response_node(llm):
         if not question:
             raise ValueError("state.user_question 不能为空")
 
+        hist = history_as_text(state)
+        human = question
+        if hist:
+            human = f"## 对话历史\n{hist}\n\n## 当前问题\n{question}"
         messages = [
             SystemMessage(content=_get_general_prompt()),
-            HumanMessage(content=question),
+            HumanMessage(content=human),
         ]
         answer = str(llm.invoke(messages).content).strip()
 
