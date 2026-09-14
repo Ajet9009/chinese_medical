@@ -1,15 +1,11 @@
 <template>
   <div class="login-page">
-    <div class="login-bg">
-      <div class="blob b1"></div>
-      <div class="blob b2"></div>
-    </div>
     <form class="login-card" @submit.prevent="onSubmit">
-      <div class="login-head">
+      <div class="login-brand">
         <div class="brand-seal">草</div>
-        <h1>草<span>本</span>通</h1>
+        <h1>草本通</h1>
+        <p class="login-sub">使用医师管理员配发的账号登录。不开放自行注册。</p>
       </div>
-      <p class="login-sub">中医知识图谱问答。问方、问药、问证，多轮追问仍接上文。</p>
       <div class="field">
         <label class="field-label">用户名</label>
         <input class="input" v-model="username" autocomplete="username" placeholder="请输入用户名" />
@@ -24,14 +20,9 @@
           placeholder="请输入密码"
         />
       </div>
-      <button class="btn" type="submit" :disabled="busy">{{ busy ? "登录中…" : "🌿 入室" }}</button>
+      <button class="btn" type="submit" :disabled="busy">{{ busy ? "登录中…" : "登录" }}</button>
       <div v-if="error" class="err">{{ error }}</div>
-      <p class="hint">由医师管理员开方配帐，不开放自行注册。</p>
-      <div class="login-feats">
-        <span class="badge badge-primary">知识图谱</span>
-        <span class="badge badge-info">多轮问诊</span>
-        <span class="badge badge-success">方药检索</span>
-      </div>
+      <p class="hint">忘记密码时联系管理员重置，不要在公共设备保存会话。</p>
     </form>
   </div>
 </template>

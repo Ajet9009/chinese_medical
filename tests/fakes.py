@@ -14,6 +14,14 @@ class FakeLLM:
         self.calls += 1
         return type("R", (), {"content": self.content})()
 
+    def stream(self, messages: Any):
+        """步骤：01 把 invoke 结果当单块吐出，模拟 ChatOpenAI.stream（协议名不能改）。"""
+        yield self.invoke(messages)
+
+    async def astream(self, messages: Any):
+        """步骤：01 异步吐出 invoke 结果，模拟 ChatOpenAI.astream（协议名不能改）。"""
+        yield self.invoke(messages)
+
 
 class BoomLLM:
     def invoke(self, _messages: Any) -> Any:

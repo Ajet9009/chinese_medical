@@ -51,6 +51,10 @@ export function listConversations(keyword = "") {
   return json("/conversations" + q);
 }
 
+export function listLlmProviders() {
+  return json("/llm/providers");
+}
+
 export function createConversation(title = "") {
   return json("/conversations", { method: "POST", body: JSON.stringify({ title }) });
 }
@@ -288,20 +292,49 @@ export function adminResetPassword(id, password) {
   });
 }
 
-export function adminLogs(limit = 50, offset = 0) {
-  return json(`/admin/logs?limit=${limit}&offset=${offset}`);
+export function adminLogs({
+  limit = 50,
+  offset = 0,
+  username = "",
+  operateType = "",
+  start = "",
+  end = "",
+} = {}) {
+  const q = new URLSearchParams();
+  q.set("limit", String(limit));
+  q.set("offset", String(offset));
+  if (username) q.set("username", username);
+  if (operateType) q.set("operate_type", operateType);
+  if (start) q.set("start", start);
+  if (end) q.set("end", end);
+  return json(`/admin/logs?${q.toString()}`);
 }
 
-export async function streamAsk(question, conversationId, onEvent, options = {}) {
-  const { signal, omitUserMessage } = options;
+/**
+ * 步骤：01
+ * POST /ask/stream，按 SSE 逐行回调。标明 Accept 为事件流，读完后消化残余缓冲，避免最后一包丢 token。
+ *
+ * @param {string} question 用户问题
+ * @param {string} [conversationId] 已有会话；空则后端按首问建库
+ * @param {(event: string, data: object) => void} onEvent SSE 回调
+ * @param {{ signal?: AbortSignal, omitUserMessage?: boolean, modelType?: string }} [options]
+ */
+export async function streamAsk_step_01(question, conversationId, onEvent, options = {}) {
+  const { signal, omitUserMessage, modelType } = options;
   const res = await fetch(BASE + "/ask/stream", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...authHeaders() },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      "Cache-Control": "no-cache",
+      ...authHeaders(),
+    },
     signal,
     body: JSON.stringify({
       question,
       conversation_id: conversationId || undefined,
       omit_user_message: Boolean(omitUserMessage),
+      model_type: modelType || undefined,
     }),
   });
   if (res.status === 401) {
@@ -317,6 +350,22 @@ export async function streamAsk(question, conversationId, onEvent, options = {})
   const decoder = new TextDecoder();
   let buf = "";
   let eventName = "message";
+  const dispatchLine = (line) => {
+    const trimmed = line.replace(/\r$/, "");
+    if (trimmed.startsWith("event:")) {
+      eventName = trimmed.slice(6).trim();
+    } else if (trimmed.startsWith("data:")) {
+      const raw = trimmed.slice(5).trim();
+      let data = {};
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        data = { raw };
+      }
+      onEvent(eventName, data);
+      eventName = "message";
+    }
+  };
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -325,19 +374,13 @@ export async function streamAsk(question, conversationId, onEvent, options = {})
       const parts = buf.split("\n");
       buf = parts.pop() || "";
       for (const line of parts) {
-        if (line.startsWith("event:")) {
-          eventName = line.slice(6).trim();
-        } else if (line.startsWith("data:")) {
-          const raw = line.slice(5).trim();
-          let data = {};
-          try {
-            data = JSON.parse(raw);
-          } catch {
-            data = { raw };
-          }
-          onEvent(eventName, data);
-          eventName = "message";
-        }
+        dispatchLine(line);
+      }
+    }
+    buf += decoder.decode();
+    if (buf) {
+      for (const line of buf.split("\n")) {
+        if (line) dispatchLine(line);
       }
     }
   } catch (err) {
@@ -348,3 +391,5 @@ export async function streamAsk(question, conversationId, onEvent, options = {})
     throw err;
   }
 }
+
+export { streamAsk_step_01 as streamAsk };

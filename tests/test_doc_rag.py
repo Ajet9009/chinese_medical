@@ -81,7 +81,7 @@ def test_answer_refuses_without_calling_llm():
 
     llm = FakeLLM("不该生成这段")
     node = make_answer_generation_node(llm)
-    out = node(
+    out = node.invoke(
         {
             "user_question": "某某不存在的古方有何功效？",
             "neo4j_answer": "",
@@ -105,7 +105,7 @@ def test_answer_prompt_mixes_kg_and_docs():
             return type("R", (), {"content": "益气健脾"})()
 
     node = make_answer_generation_node(Cap())
-    out = node(
+    out = node.invoke(
         {
             "user_question": "四君子汤有什么功效？",
             "neo4j_answer": "四君子汤 | HAS_EFFECT | 补气健脾",
@@ -147,6 +147,7 @@ def test_doc_retrieval_node_uses_search_question():
         {
             "user_question": "它由哪些药组成？",
             "search_question": "四君子汤由哪些药组成？",
+            "is_zhongyi_intent": True,
         }
     )
     assert seen == ["四君子汤由哪些药组成？"]
@@ -357,7 +358,7 @@ def test_answer_citation_fail_refuses_without_kg():
             return type("R", (), {"content": "水星绕太阳公转，与中药无关。"})()
 
     node = make_answer_generation_node(Cap())
-    out = node(
+    out = node.invoke(
         {
             "user_question": "四君子汤有什么功效？",
             "neo4j_answer": "",
@@ -386,7 +387,7 @@ def test_answer_citation_fail_keeps_kg_answer():
             return type("R", (), {"content": "水星绕太阳公转。"})()
 
     node = make_answer_generation_node(Cap())
-    out = node(
+    out = node.invoke(
         {
             "user_question": "四君子汤有什么功效？",
             "neo4j_answer": "四君子汤 | HAS_EFFECT | 补气健脾",
@@ -416,7 +417,7 @@ def test_answer_ambiguous_prefixes_uncertainty():
             return type("R", (), {"content": "四君子汤益气健脾。"})()
 
     node = make_answer_generation_node(Cap())
-    out = node(
+    out = node.invoke(
         {
             "user_question": "四君子汤有什么功效？",
             "neo4j_answer": "",

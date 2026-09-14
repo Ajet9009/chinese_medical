@@ -1,51 +1,43 @@
 <template>
-  <div class="governance-page">
-    <section class="governance-hero">
-      <div class="hero-copy">
-        <div class="hero-eyebrow"><span class="pulse-dot"></span> 文献生命周期</div>
-        <h1>让每条知识都有清晰的有效边界</h1>
-        <p>统一管理责任人、适用区域、有效期与版本关系；扫描只生成可解释的问题线索，不会自动覆盖原文。</p>
-        <div class="hero-actions">
-          <button class="btn" type="button" @click="runScan()">发起治理扫描</button>
-          <button class="btn ghost" type="button" :disabled="refreshing" @click="refreshAll">
-            {{ refreshing ? "刷新中…" : "刷新数据" }}
-          </button>
-        </div>
+  <div class="page governance-page">
+    <div class="page-inner">
+    <header class="page-head">
+      <div>
+        <h2>知识治理</h2>
+        <p class="hint">补录责任人、有效期与版本；扫描只生成问题线索，不改原文。</p>
       </div>
-      <div class="lifecycle">
-        <div v-for="(stage, index) in lifecycleStages" :key="stage.title" class="lifecycle-stage">
-          <span class="stage-node">{{ index + 1 }}</span>
-          <div>
-            <strong>{{ stage.title }}</strong>
-            <small>{{ stage.desc }}</small>
-          </div>
-        </div>
+      <div class="row">
+        <button class="btn" type="button" @click="runScan()">发起扫描</button>
+        <button class="btn ghost" type="button" :disabled="refreshing" @click="refreshAll">
+          {{ refreshing ? "刷新中…" : "刷新" }}
+        </button>
       </div>
-    </section>
+    </header>
+    <ol class="lifecycle-inline">
+      <li v-for="(stage, index) in lifecycleStages" :key="stage.title">
+        <b>{{ index + 1 }}</b>
+        <span>{{ stage.title }} · {{ stage.desc }}</span>
+      </li>
+    </ol>
 
-    <section class="stat-grid governance-stats">
-      <div class="stat stat-accent">
-        <div class="stat-kicker">知识资产</div>
-        <div class="stat-val">{{ stats.documents ?? 0 }}</div>
-        <div class="stat-lbl">纳入治理的文献总数</div>
+    <div class="mini-stats mini-stats-inline">
+      <div class="mini-stat">
+        <div class="mini-val">{{ stats.documents ?? 0 }}</div>
+        <div class="mini-lbl">文献</div>
       </div>
-      <div class="stat">
-        <div class="stat-kicker">元数据覆盖</div>
-        <div class="coverage-value">{{ coveragePercent }}%</div>
-        <div class="coverage-track"><span :style="{ width: coveragePercent + '%' }"></span></div>
-        <div class="stat-lbl">{{ stats.governedDocuments ?? 0 }} 份已建立治理档案</div>
+      <div class="mini-stat">
+        <div class="mini-val">{{ coveragePercent }}%</div>
+        <div class="mini-lbl">元数据覆盖</div>
       </div>
-      <div class="stat">
-        <div class="stat-kicker">待处置</div>
-        <div class="stat-val">{{ unresolvedCount }}</div>
-        <div class="stat-lbl">待确认或处理中问题</div>
+      <div class="mini-stat">
+        <div class="mini-val">{{ unresolvedCount }}</div>
+        <div class="mini-lbl">待处置</div>
       </div>
-      <div class="stat">
-        <div class="stat-kicker">扫描发现</div>
-        <div class="stat-val">{{ lastScan?.findings ?? 0 }}</div>
-        <div class="stat-lbl">最近一次扫描的问题数</div>
+      <div class="mini-stat">
+        <div class="mini-val">{{ lastScan?.findings ?? 0 }}</div>
+        <div class="mini-lbl">最近扫描</div>
       </div>
-    </section>
+    </div>
 
     <section v-if="lastScan" class="scan-result">
       <div>
@@ -71,7 +63,6 @@
       <div class="card-header workspace-head">
         <div>
           <h2 class="card-title">文献治理档案</h2>
-          <div class="hint">补录责任人、适用区域、生效与复审策略，决定知识在检索链路中的可用状态。</div>
         </div>
         <div class="row">
           <input class="input" v-model.trim="docKeyword" placeholder="搜索文档名称" style="width:200px" @keyup.enter="searchDocuments" />
@@ -292,6 +283,7 @@
       </div>
     </div>
     <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
+    </div>
   </div>
 </template>
 

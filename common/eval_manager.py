@@ -52,15 +52,12 @@ class EvalManager:
         self._client = None
         self._llm = None
         try:
-            import langfuse
             if not os.getenv("LANGFUSE_SECRET_KEY") or not os.getenv("LANGFUSE_PUBLIC_KEY"):
                 logger.warning("Langfuse 密钥缺失，评估功能不可用")
                 return
-            self._client = langfuse.Langfuse(
-                secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
-                public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
-                host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-            )
+            from common.langfuse_manager import make_langfuse_client
+
+            self._client = make_langfuse_client()
         except Exception as exc:
             logger.warning("Langfuse 初始化失败，评估功能不可用: %s", exc)
 

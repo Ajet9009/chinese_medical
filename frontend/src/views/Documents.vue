@@ -1,9 +1,22 @@
 <template>
-  <div class="doc-page">
-    <div class="doc-grid">
-      <div v-if="auth.isAdmin" class="card">
+  <div class="page doc-page">
+    <div class="page-inner">
+    <header class="page-head">
+      <div>
+        <h2>知识库</h2>
+        <p class="hint">解析并向量化后才能被问答检索。同名换版会归档，可回滚。</p>
+      </div>
+      <div class="mini-stats mini-stats-inline">
+        <div class="mini-stat"><div class="mini-val">{{ stats?.docTotal ?? "-" }}</div><div class="mini-lbl">文档</div></div>
+        <div class="mini-stat"><div class="mini-val">{{ stats?.chunkTotal ?? "-" }}</div><div class="mini-lbl">分块</div></div>
+        <div class="mini-stat"><div class="mini-val">{{ stats?.vectorTotal ?? "-" }}</div><div class="mini-lbl">向量</div></div>
+        <div class="mini-stat"><div class="mini-val">{{ stats?.byStatus?.vectorized ?? 0 }}</div><div class="mini-lbl">已向量化</div></div>
+      </div>
+    </header>
+
+    <section v-if="auth.isAdmin" class="card upload-panel">
         <div class="card-header">
-          <h3 class="card-title">📤 上传文献</h3>
+          <h3 class="card-title">上传文献</h3>
           <span class="hint">Markdown / 文本 / PDF · 批量≤5 · 单份≤8MB</span>
         </div>
         <div
@@ -34,21 +47,19 @@
           </ul>
         </div>
         <div class="row" style="margin-top: 14px">
-          <select class="select" v-model="docType" style="width:auto">
+          <select class="select" v-model="docType">
             <option v-for="t in DOC_TYPES" :key="t">{{ t }}</option>
           </select>
           <input
             class="input"
             v-model="dept"
             placeholder="科室(脾胃/伤寒,空=公开)"
-            style="width:190px"
             title="文档级 ACL：限定某科室可见，空=全员公开"
           />
           <input
             class="input"
             v-model="allowedRoles"
             placeholder="授权角色(user,admin,空=全员)"
-            style="width:200px"
             title="限定可读角色，空=科室内全员"
           />
           <button class="btn" type="button" :disabled="!files.length || uploading" @click="upload">
@@ -71,30 +82,15 @@
             />
           </div>
         </details>
-        <div v-if="uploading" class="progress">
+        <div v-if="uploading" class="upload-progress">
           <div class="progress-bar" :style="{ width: progress + '%' }"></div>
           <span>{{ progress }}%</span>
         </div>
-      </div>
-
-      <div class="card">
-        <div class="card-header"><h3 class="card-title">📊 知识库概览</h3></div>
-        <div class="mini-stats">
-          <div class="mini-stat"><div class="mini-val">{{ stats?.docTotal ?? "-" }}</div><div class="mini-lbl">文档</div></div>
-          <div class="mini-stat"><div class="mini-val">{{ stats?.chunkTotal ?? "-" }}</div><div class="mini-lbl">分块</div></div>
-          <div class="mini-stat"><div class="mini-val">{{ stats?.vectorTotal ?? "-" }}</div><div class="mini-lbl">向量</div></div>
-          <div class="mini-stat"><div class="mini-val">{{ stats?.byStatus?.vectorized ?? 0 }}</div><div class="mini-lbl">已向量化</div></div>
-        </div>
-        <p class="hint" style="margin: 12px 0 0">
-          上传后需依次「解析」「向量化」才能被检索；同名文献换版会自动归档可回滚。
-          <template v-if="!auth.isAdmin">医师仅可浏览本科室可见文献。</template>
-        </p>
-      </div>
-    </div>
+    </section>
 
     <div class="card doc-list">
       <div class="card-header">
-        <h3 class="card-title">📚 文献列表 <span class="badge badge-neutral">{{ total }}</span></h3>
+        <h3 class="card-title">文献列表 <span class="badge badge-neutral">{{ total }}</span></h3>
         <div class="row">
           <input class="input" v-model="filterKw" placeholder="🔍 按文件名筛选" style="width:200px" />
           <select class="select" v-model="filterType" style="width:auto" @change="resetPage">
@@ -214,6 +210,7 @@
           </tbody>
         </table>
       </div>
+    </div>
     </div>
     <div v-if="toastMsg" class="toast">{{ toastMsg }}</div>
   </div>

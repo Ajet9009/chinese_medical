@@ -1,7 +1,12 @@
 <template>
-  <div class="admin-page">
-    <h2>管理</h2>
-    <p class="hint admin-lead">反馈可标入黄金集回流；系统运行状态含降级打点。仅 user / admin 两角色，不开放自行注册。</p>
+  <div class="page admin-page">
+    <div class="page-inner">
+    <header class="page-head">
+      <div>
+        <h2>管理</h2>
+        <p class="hint">反馈可写入黄金集。仅 user / admin 两角色，不开放自行注册。</p>
+      </div>
+    </header>
     <div class="tabs">
       <button
         v-for="tab in tabs"
@@ -66,7 +71,7 @@
 
     <section v-else-if="current === 'prompts'" class="card">
       <p class="hint" style="margin-top:0">
-        Langfuse：{{ prompts.langfuse_enabled ? "已启用" : "未启用" }}。本页只读，不在此改模板。
+        Langfuse：{{ prompts.langfuse_enabled ? "已启用" : "未启用" }}。本页只读，改模板去 Langfuse → Prompts（约 60 秒后生效）。
       </p>
       <table class="tbl">
         <thead>
@@ -220,7 +225,32 @@
     </section>
 
     <section v-else-if="current === 'logs'" class="card">
-      <p class="hint" style="margin-top:0">共 {{ logs.total || 0 }} 条。登录、改密与用户管理会写入这里。</p>
+      <form class="admin-toolbar log-filters" @submit.prevent="loadLogs">
+        <label class="hint">
+          从
+          <input class="input" type="datetime-local" v-model="logStart" />
+        </label>
+        <label class="hint">
+          到
+          <input class="input" type="datetime-local" v-model="logEnd" />
+        </label>
+        <input
+          class="input"
+          v-model="logUser"
+          list="log-users"
+          placeholder="用户名"
+        />
+        <datalist id="log-users">
+          <option v-for="u in users" :key="u.id" :value="u.username" />
+        </datalist>
+        <select class="select" v-model="logType">
+          <option value="">全部类型</option>
+          <option v-for="t in logTypeOptions" :key="t" :value="t">{{ t }}</option>
+        </select>
+        <button class="btn sm" type="submit">🔍 查询</button>
+        <button class="btn ghost sm" type="button" @click="resetLogFilters">重置</button>
+        <span class="hint">共 {{ logs.total || 0 }} 条</span>
+      </form>
       <table class="tbl">
         <thead>
           <tr>
@@ -238,7 +268,7 @@
             <td class="clip">{{ item.content }}</td>
           </tr>
           <tr v-if="!(logs.items || []).length">
-            <td colspan="4" class="hint">暂无日志</td>
+            <td colspan="4" class="hint">暂无匹配日志</td>
           </tr>
         </tbody>
       </table>
@@ -372,11 +402,12 @@
       </div>
     </div>
     <div v-if="error" class="err">{{ error }}</div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   adminCreateUser,
   adminDeleteUser,
@@ -415,7 +446,27 @@ const golden = ref({ total: 0, labeled: 0, pending: 0, items: [] });
 const goldenBusy = ref("");
 const goldenHint = ref("");
 const users = ref([]);
-const logs = ref({ total: 0, items: [] });
+const logs = ref({ total: 0, items: [], operate_types: [] });
+const logStart = ref("");
+const logEnd = ref("");
+const logUser = ref("");
+const logType = ref("");
+const LOG_TYPE_FALLBACK = [
+  "登录",
+  "改资料",
+  "改密码",
+  "用户管理",
+  "文档上传",
+  "文档回滚",
+  "文档解析",
+  "文档删除",
+  "文档授权",
+  "知识治理",
+];
+const logTypeOptions = computed(() => {
+  const fromApi = logs.value.operate_types || [];
+  return [...new Set([...fromApi, ...LOG_TYPE_FALLBACK])];
+});
 const newUser = ref({ username: "", password: "", role: "user", dept: "" });
 const userErr = ref("");
 const meId = ref(auth.userId || "");
@@ -456,8 +507,31 @@ async function loadUsers() {
   users.value = await adminUsers();
 }
 
+function localToIso(value, asEnd = false) {
+  if (!value) return "";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "";
+  if (asEnd && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value)) {
+    d.setSeconds(59, 999);
+  }
+  return d.toISOString();
+}
+
 async function loadLogs() {
-  logs.value = await adminLogs();
+  logs.value = await adminLogs({
+    username: logUser.value.trim(),
+    operateType: logType.value,
+    start: localToIso(logStart.value),
+    end: localToIso(logEnd.value, true),
+  });
+}
+
+async function resetLogFilters() {
+  logStart.value = "";
+  logEnd.value = "";
+  logUser.value = "";
+  logType.value = "";
+  await loadLogs();
 }
 
 async function loadGolden() {

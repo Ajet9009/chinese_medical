@@ -96,7 +96,7 @@ class TestLangfuseManagerSampling:
             from common.langfuse_manager import LangfuseManager
             mgr = LangfuseManager()
             # 采样率为 0 时，即使客户端可用也不应该采样
-            assert mgr.is_enabled() is False
+            assert mgr.should_sample() is False
 
     def test_sample_rate_one_always_samples(self, monkeypatch):
         monkeypatch.setenv("LANGFUSE_ENABLED", "true")

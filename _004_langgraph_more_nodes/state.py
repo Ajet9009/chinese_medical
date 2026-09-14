@@ -4,14 +4,12 @@ from typing import Literal, TypedDict
 
 
 class MatchedEntity(TypedDict, total=False):
-    """FAISS 匹配到的标准实体。"""
     id: str
     type: str
     name: str
     score: float
 
 
-# ── 知识图谱实体类型（与 data/neo4j/entities.json 一致）──
 KG_ENTITY_TYPES = {
     "Herb": "药材（单味中药，如人参、黄芪、甘草）",
     "Formula": "方剂（多味药材组成的复方，如四君子汤、桂枝汤）",
@@ -24,7 +22,6 @@ KG_ENTITY_TYPES = {
     "Meridian": "经络（药物归经，如肺经、肝经、脾经）",
 }
 
-# ── 知识图谱关系类型 ──
 KG_RELATION_TYPES = {
     "TREATS_DISEASE": "治疗疾病",
     "ALLEVIATES_SYMPTOM": "缓解症状",
@@ -36,9 +33,6 @@ KG_RELATION_TYPES = {
     "HAS_MERIDIAN": "归入经络",
 }
 
-KG_ENTITY_TYPE_NAMES = frozenset(KG_ENTITY_TYPES.keys())
-KG_RELATION_TYPE_NAMES = frozenset(KG_RELATION_TYPES.keys())
-
 
 class ChatMessage(TypedDict):
     role: Literal["user", "assistant"]
@@ -49,31 +43,23 @@ class GraphState(TypedDict, total=False):
     user_question: str
     search_question: str
     messages: list[ChatMessage]
-    intent: Literal["tcm", "general"]
-    intent_reason: str
     is_zhongyi_intent: bool
     final_answer: str
-    # 六类用户输入实体
     user_input_symptoms: list[str]
     user_input_diseases: list[str]
     user_input_formulas: list[str]
     user_input_herbs: list[str]
     user_input_effects: list[str]
     user_input_sources: list[str]
-    # 六类匹配到的标准实体
     matched_symptoms: list[MatchedEntity]
     matched_diseases: list[MatchedEntity]
     matched_formulas: list[MatchedEntity]
     matched_herbs: list[MatchedEntity]
     matched_effects: list[MatchedEntity]
     matched_sources: list[MatchedEntity]
-    # 生成的 Cypher 查询语句
     cypher_queries: list[str]
-    # Cypher 校验重试次数（>0 表示生成过程中有过重试）
     cypher_retry_count: int
-    # Neo4j 执行结果（去重去噪后的精简上下文）
     neo4j_answer: str
-    # W3 文档 RAG（混合检索 + CRAG）
     doc_chunks: list[dict]
     doc_context: str
     refused: bool
@@ -83,20 +69,18 @@ class GraphState(TypedDict, total=False):
     citation_ok: bool
     viewer_dept: str
     viewer_role: str
+    llm_provider: str
+    intent_reason: str
 
 
 def question_for_retrieval(state: GraphState) -> str:
-    """检索/抽取/Cypher 用消解后的独立问句，没有则用原问题。"""
+    """Use a standalone question when the preceding node has produced one."""
     return str(state.get("search_question") or state.get("user_question") or "").strip()
 
 
 def history_as_text(state: GraphState) -> str:
-    msgs = list(state.get("messages") or [])
-    if not msgs:
-        return ""
-    lines: list[str] = []
-    for item in msgs:
-        role = "用户" if item.get("role") == "user" else "助手"
-        lines.append(f"{role}：{item.get('content', '')}")
-    return "\n".join(lines)
-
+    messages = list(state.get("messages") or [])
+    return "\n".join(
+        f"{'用户' if item.get('role') == 'user' else '助手'}：{item.get('content', '')}"
+        for item in messages
+    )

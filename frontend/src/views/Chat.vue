@@ -1,11 +1,44 @@
 <template>
   <div class="shell" :class="{ collapsed: convCollapsed }">
     <aside class="side">
-      <div class="side-actions">
-        <button class="btn" type="button" @click="newChat">＋ 新对话</button>
-        <button class="btn ghost" type="button" @click="showFavPanel = !showFavPanel">
-          {{ showFavPanel ? "⭐ 收起收藏" : "⭐ 我的收藏" }}
-        </button>
+      <button class="ds-new-chat" type="button" @click="newChat_step_02">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <path d="M8 3.2v9.6M3.2 8h9.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+        </svg>
+        开启新对话
+      </button>
+      <div class="side-search">
+        <input class="input" v-model="searchKw" placeholder="搜索对话" @input="onSearch" />
+      </div>
+      <div class="conv-batch" v-if="selectMode && conversations.length">
+        <label>
+          <input type="checkbox" :checked="allConvsSelected" @change="toggleAllConvs($event.target.checked)" />
+          全选
+        </label>
+        <span class="hint">{{ selectedConvs.size }}/{{ conversations.length }}</span>
+        <button
+          class="btn danger sm"
+          type="button"
+          :disabled="!selectedConvs.size"
+          @click="batchRemoveConvs"
+        >🗑️ 删选中</button>
+      </div>
+      <div class="side-hist-label">
+        <span>历史对话</span>
+        <button
+          class="icon-btn"
+          :class="{ on: showFavPanel }"
+          type="button"
+          title="收藏"
+          @click="showFavPanel = !showFavPanel"
+        >★</button>
+        <button
+          class="icon-btn"
+          :class="{ on: selectMode }"
+          type="button"
+          title="批量管理"
+          @click="toggleSelectMode_step_01"
+        >选</button>
       </div>
       <div v-if="showFavPanel" class="fav-panel">
         <div v-if="!favList.length" class="hint">暂无收藏，可在回答下点击「⭐ 收藏」</div>
@@ -18,22 +51,6 @@
           <span class="fav-q">{{ f.query }}</span>
           <button class="icon-btn" type="button" title="取消收藏" @click.stop="delFav(f.id)">✕</button>
         </div>
-      </div>
-      <div class="side-search">
-        <input class="input" v-model="searchKw" placeholder="🔍 搜索对话" @input="onSearch" />
-      </div>
-      <div class="conv-batch" v-if="conversations.length">
-        <label>
-          <input type="checkbox" :checked="allConvsSelected" @change="toggleAllConvs($event.target.checked)" />
-          全选
-        </label>
-        <span class="hint">{{ selectedConvs.size }}/{{ conversations.length }}</span>
-        <button
-          class="btn danger sm"
-          type="button"
-          :disabled="!selectedConvs.size"
-          @click="batchRemoveConvs"
-        >🗑️ 删选中</button>
       </div>
       <div class="conv-list">
         <div
@@ -53,6 +70,7 @@
           />
           <template v-else>
             <input
+              v-if="selectMode"
               type="checkbox"
               class="conv-check"
               :checked="selectedConvs.has(c.id)"
@@ -73,18 +91,24 @@
           {{ searchKw ? "无匹配对话" : "暂无历史对话" }}
         </div>
       </div>
-      <button class="collapse-btn" type="button" @click="convCollapsed = true" title="收起">‹</button>
+      <button class="collapse-btn" type="button" title="收起列表" @click="convCollapsed = true">«</button>
     </aside>
+    <button
+      v-if="!convCollapsed"
+      class="side-backdrop"
+      type="button"
+      aria-label="收起对话列表"
+      @click="convCollapsed = true"
+    ></button>
 
     <section class="main">
-      <header class="chat-head">
-        <button v-if="convCollapsed" class="icon-btn menu" type="button" @click="convCollapsed = false">☰</button>
-        <h2>{{ currentTitle }}</h2>
-        <div class="hint">图谱检索用消解后的问句；回答保留你的原话与上文。</div>
+      <header class="chat-head" :class="{ 'is-empty': !messages.length }">
+        <button v-if="convCollapsed" class="icon-btn menu" type="button" title="展开对话列表" aria-label="展开对话列表" @click="convCollapsed = false">☰</button>
+        <h2 v-if="messages.length">{{ currentTitle }}</h2>
       </header>
 
       <div class="msgs" ref="listEl">
-        <div class="msg-batch" v-if="selectableMsgIds.length">
+        <div class="msg-batch" v-if="selectMode && selectableMsgIds.length">
           <label>
             <input type="checkbox" :checked="allMsgsSelected" @change="toggleAllMsgs($event.target.checked)" />
             全选
@@ -94,7 +118,7 @@
         </div>
 
         <div v-if="!messages.length" class="empty">
-          <div class="seal">问</div>
+          <h1>今天想问点什么？</h1>
           <p>从一味药、一方剂问起。可追问「它由哪些药组成？」</p>
           <div class="examples">
             <button
@@ -102,7 +126,7 @@
               :key="ex"
               class="chip"
               type="button"
-              @click="send(ex)"
+              @click="send_step_03(ex)"
             >{{ ex }}</button>
           </div>
         </div>
@@ -118,7 +142,7 @@
                 </div>
               </template>
               <template v-else>
-                <label v-if="m.id" class="msg-check" @click.stop>
+                <label v-if="selectMode && m.id" class="msg-check" @click.stop>
                   <input type="checkbox" :checked="selectedMsgs.has(m.id)" @change="toggleMsg(m.id)" />
                 </label>
                 {{ m.content }}
@@ -126,24 +150,25 @@
               </template>
             </template>
             <template v-else>
-              <div v-if="!m.streaming" class="bubble-actions">
-                <button class="text-btn" type="button" @click="regenerate(m)">🔄 重生成</button>
-                <button class="text-btn" type="button" @click="copyAnswer(m)">📋 复制</button>
-                <button class="text-btn" type="button" @click="exportWord(m)">📄 导出</button>
-                <button class="text-btn" type="button" @click="saveFavorite(m)">⭐ 收藏</button>
-              </div>
-              <ul v-if="m.progress && m.progress.length" class="progress">
+              <ul v-if="m.progress && m.progress.length" class="chat-progress">
                 <li v-for="(p, j) in m.progress" :key="j">{{ p }}</li>
               </ul>
               <div v-if="m.role === 'assistant' && !m.streaming" class="md" v-html="renderMd(m.content)"></div>
               <div v-else>{{ m.content }}<span v-if="m.streaming" class="cursor">▍</span></div>
               <div v-if="m.aborted" class="hint">已停止生成（仅显示已接收内容）</div>
-              <div class="meta" v-if="!m.streaming && (m.details?.elapsed_ms || m.id)">
+              <div class="meta" v-if="!m.streaming && (m.details?.elapsed_ms || m.id || m.details?.model_type)">
+                <span v-if="m.details?.model_type" class="badge">🤖 {{ modelLabel(m.details.model_type) }}</span>
                 <span v-if="m.details?.elapsed_ms">{{ Math.round(m.details.elapsed_ms) }} ms</span>
                 <span class="fb">
                   <button class="text-btn" :class="{ on: m.details?.feedback === 'like' }" type="button" @click="setFeedback(m, 'like')" title="赞">👍</button>
                   <button class="text-btn" :class="{ on: m.details?.feedback === 'dislike' }" type="button" @click="setFeedback(m, 'dislike')" title="踩">👎</button>
                 </span>
+              </div>
+              <div v-if="!m.streaming" class="bubble-actions">
+                <button class="text-btn" type="button" @click="regenerate(m)">🔄 重生成</button>
+                <button class="text-btn" type="button" @click="copyAnswer(m)">📋 复制</button>
+                <button class="text-btn" type="button" @click="exportWord(m)">📄 导出</button>
+                <button class="text-btn" type="button" @click="saveFavorite(m)">⭐ 收藏</button>
               </div>
               <details v-if="m.details && hasDetails(m.details)" class="details">
                 <summary>🔍 推理过程</summary>
@@ -175,7 +200,7 @@
                     :key="rq"
                     class="rq"
                     type="button"
-                    @click="send(rq)"
+                    @click="send_step_03(rq)"
                   >{{ rq }}</button>
                 </div>
               </div>
@@ -185,16 +210,52 @@
       </div>
 
       <div class="composer">
-        <form @submit.prevent="onSubmit">
+        <form class="composer-box" @submit.prevent="onSubmit">
           <textarea
             v-model="draft"
             rows="2"
             :disabled="busy"
-            placeholder="输入中医问题，Enter 发送，Shift+Enter 换行"
+            placeholder="给草本通发送消息"
             @keydown.enter.exact.prevent="onSubmit"
           />
-          <button v-if="busy" class="btn send danger" type="button" @click="stopGen">⏹ 停止</button>
-          <button v-else class="btn send" type="submit" :disabled="!draft.trim()">➤ 发送</button>
+          <div class="composer-bar">
+            <select class="select model-sel" v-model="modelType" :disabled="busy" title="切换回答模型">
+              <option
+                v-for="p in llmProviders"
+                :key="p.id || 'default'"
+                :value="p.id"
+                :disabled="!p.configured"
+              >{{ p.label }}{{ p.configured ? "" : "（未配置）" }}</option>
+            </select>
+            <button
+              v-if="busy"
+              class="send-fab stop"
+              type="button"
+              title="停止"
+              @click="stopGen"
+            >
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor" />
+              </svg>
+            </button>
+            <button
+              v-else
+              class="send-fab"
+              type="submit"
+              title="发送"
+              :disabled="!draft.trim()"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path
+                  d="M8 12.5V3.5M8 3.5 3.8 7.7M8 3.5l4.2 4.2"
+                  stroke="currentColor"
+                  stroke-width="1.8"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
         </form>
         <div v-if="error" class="err">{{ error }}</div>
       </div>
@@ -204,21 +265,21 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onMounted, ref } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import MarkdownIt from "markdown-it";
 import {
   addFavorite,
   batchDeleteConversations,
   batchDeleteMessages,
-  createConversation,
   deleteConversation,
   deleteFavorite,
   listConversations,
   listFavorites,
+  listLlmProviders,
   listMessages,
   patchMessage,
   renameConversation,
-  streamAsk,
+  streamAsk_step_01,
 } from "../api.js";
 
 const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
@@ -228,6 +289,17 @@ const examples = [
   "咳嗽应该吃什么中药？",
 ];
 
+const TOKEN_MODEL = "cm_model_type";
+const llmProviders = ref([
+  { id: "", label: "默认模型", configured: true },
+  { id: "deepseek", label: "DeepSeek", configured: true },
+  { id: "qwen", label: "通义千问", configured: false },
+  { id: "doubao", label: "豆包", configured: false },
+]);
+const modelType = ref(localStorage.getItem(TOKEN_MODEL) || "");
+watch(modelType, (id) => {
+  localStorage.setItem(TOKEN_MODEL, id || "");
+});
 const conversations = ref([]);
 const currentId = ref("");
 const messages = ref([]);
@@ -238,11 +310,14 @@ const editingId = ref("");
 const editingTitle = ref("");
 const listEl = ref(null);
 const searchKw = ref("");
-const convCollapsed = ref(false);
+const convCollapsed = ref(
+  typeof window !== "undefined" && window.matchMedia("(max-width: 768px)").matches
+);
 const showFavPanel = ref(false);
 const favList = ref([]);
 const selectedConvs = ref(new Set());
 const selectedMsgs = ref(new Set());
+const selectMode = ref(false);
 const toastMsg = ref("");
 let abortCtl = null;
 let toastTimer = null;
@@ -260,6 +335,24 @@ const selectableMsgIds = computed(() => messages.value.filter((m) => m.id).map((
 const allMsgsSelected = computed(
   () => selectableMsgIds.value.length > 0 && selectedMsgs.value.size === selectableMsgIds.value.length
 );
+
+function modelLabel(id) {
+  const hit = llmProviders.value.find((p) => p.id === id);
+  if (hit) return hit.label;
+  return ({ deepseek: "DeepSeek", qwen: "通义千问", doubao: "豆包" })[id] || "默认模型";
+}
+
+/**
+ * 步骤：01
+ * 切换会话与消息的批量管理。关闭时清空已选，避免误删。
+ */
+function toggleSelectMode_step_01() {
+  selectMode.value = !selectMode.value;
+  if (!selectMode.value) {
+    selectedConvs.value = new Set();
+    selectedMsgs.value = new Set();
+  }
+}
 
 function renderMd(text) {
   return md.render(text || "");
@@ -344,12 +437,16 @@ async function refreshFavs() {
   favList.value = await listFavorites();
 }
 
-async function newChat() {
-  const c = await createConversation("新对话");
-  currentId.value = c.id;
+/**
+ * 步骤：02
+ * 只清空前端草稿会话，不预建库。首条提问由后端 ensure 再建会话并用问题摘要作标题。
+ */
+function newChat_step_02() {
+  currentId.value = "";
   messages.value = [];
   selectedMsgs.value = new Set();
-  await refreshConvs();
+  error.value = "";
+  draft.value = "";
 }
 
 async function selectConv(id) {
@@ -441,7 +538,7 @@ async function resendEdit(m) {
   m.content = text;
   m.editing = false;
   messages.value = messages.value.slice(0, idx + 1);
-  await send(text, { omitUser: true });
+  await send_step_03(text, { omitUser: true });
 }
 
 async function regenerate(aiMsg) {
@@ -452,7 +549,7 @@ async function regenerate(aiMsg) {
     await batchDeleteMessages(currentId.value, [aiMsg.id]);
   }
   messages.value.splice(idx, 1);
-  await send(user.content, { omitUser: true });
+  await send_step_03(user.content, { omitUser: true });
 }
 
 async function copyAnswer(m) {
@@ -484,7 +581,7 @@ async function delFav(id) {
 
 function useFav(f) {
   showFavPanel.value = false;
-  send(f.query);
+  send_step_03(f.query);
 }
 
 async function setFeedback(m, kind) {
@@ -505,7 +602,12 @@ function stopGen() {
   abortCtl?.abort();
 }
 
-async function send(text, opts = {}) {
+/**
+ * 步骤：03
+ * 走 SSE 提问。无 conversation_id 时等 session 事件再挂上新会话；占位标题由后端改成问题摘要。
+ * 必须改数组里的响应式对象；push 进去的原对象不是 Proxy，直接改不会触发打字机。
+ */
+async function send_step_03(text, opts = {}) {
   const question = (text || "").trim();
   if (!question || busy.value) return;
   error.value = "";
@@ -520,24 +622,25 @@ async function send(text, opts = {}) {
       progress: [],
     });
   }
-  const ai = {
+  messages.value.push({
     role: "assistant",
     content: "",
     details: null,
     streaming: true,
     progress: [],
     aborted: false,
-  };
-  messages.value.push(ai);
+  });
+  const ai = messages.value[messages.value.length - 1];
   await scrollBottom();
   abortCtl = new AbortController();
   try {
-    await streamAsk(
+    await streamAsk_step_01(
       question,
       currentId.value || undefined,
       (event, data) => {
         if (event === "session" && data.conversation_id) {
           currentId.value = data.conversation_id;
+          refreshConvs();
         } else if (event === "progress") {
           const mark = data.status === "done" ? "成" : "…";
           ai.progress.push(`${mark} ${data.label}`);
@@ -559,6 +662,7 @@ async function send(text, opts = {}) {
             crag_action: data.crag_action || "",
             crag_confidence: data.crag_confidence || "",
             citation_ok: data.citation_ok !== false,
+            model_type: data.model_type || modelType.value || "",
           };
         } else if (event === "error") {
           ai.streaming = false;
@@ -569,7 +673,7 @@ async function send(text, opts = {}) {
         }
         scrollBottom();
       },
-      { signal: abortCtl.signal, omitUserMessage: Boolean(opts.omitUser) }
+      { signal: abortCtl.signal, omitUserMessage: Boolean(opts.omitUser), modelType: modelType.value }
     );
     await refreshConvs();
     if (!ai.aborted && currentId.value) {
@@ -594,13 +698,21 @@ async function send(text, opts = {}) {
 }
 
 function onSubmit() {
-  send(draft.value);
+  send_step_03(draft.value);
 }
 
 onMounted(async () => {
   try {
     await refreshConvs();
     await refreshFavs();
+    try {
+      const data = await listLlmProviders();
+      if (data.items?.length) llmProviders.value = data.items;
+    } catch {
+      /* 下拉仍用本地默认三项 */
+    }
+    const picked = llmProviders.value.find((p) => p.id === modelType.value);
+    if (picked && !picked.configured) modelType.value = "";
     if (conversations.value[0]) await selectConv(conversations.value[0].id);
   } catch (e) {
     error.value = "无法连接 API（http://localhost:8000）。请先启动 python -m _005_fastapi.main";

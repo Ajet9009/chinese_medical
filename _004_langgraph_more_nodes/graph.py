@@ -27,9 +27,18 @@ except ImportError:
 
 
 def _route_by_intent(state: GraphState) -> str:
-    """根据意图识别结果路由：中医问题走实体抽取，普通问题走通用回答。"""
+    """中医走图谱；普通先检索文献，有摘录再生成，否则通用回答。"""
     if state.get("is_zhongyi_intent", False):
         return "entity_extraction"
+    return "doc_retrieval"
+
+
+def _route_after_docs(state: GraphState) -> str:
+    """图谱路径始终进最终回答；普通路径仅在向量库命中时才用文献作答。"""
+    if state.get("is_zhongyi_intent", False):
+        return "answer_generation"
+    if (state.get("doc_chunks") or []) and str(state.get("doc_context") or "").strip():
+        return "answer_generation"
     return "general_response"
 
 
@@ -55,14 +64,21 @@ def build_graph():
         _route_by_intent,
         {
             "entity_extraction": "entity_extraction",
-            "general_response": "general_response",
+            "doc_retrieval": "doc_retrieval",
         },
     )
     workflow.add_edge("entity_extraction", "entity_normalization")
     workflow.add_edge("entity_normalization", "cypher_generation")
     workflow.add_edge("cypher_generation", "cypher_executor")
     workflow.add_edge("cypher_executor", "doc_retrieval")
-    workflow.add_edge("doc_retrieval", "answer_generation")
+    workflow.add_conditional_edges(
+        "doc_retrieval",
+        _route_after_docs,
+        {
+            "answer_generation": "answer_generation",
+            "general_response": "general_response",
+        },
+    )
     workflow.add_edge("answer_generation", END)
     workflow.add_edge("general_response", END)
 

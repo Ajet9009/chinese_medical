@@ -73,6 +73,39 @@ def test_title_from_question():
     assert title_from_question("短") == "短"
 
 
+def test_ensure_titles_from_question(store):
+    s, _ = store
+    conv = s.ensure(None, "四君子汤有什么功效？", user_id="u1")
+    assert conv.title == "四君子汤有什么功效？"
+
+
+def test_ensure_renames_placeholder(store):
+    s, _ = store
+    conv = s.create("新对话", user_id="u1")
+    out = s.ensure(conv.id, "人参补气吗？", user_id="u1")
+    assert out.id == conv.id
+    assert out.title == "人参补气吗？"
+    unnamed = s.create("未命名", user_id="u1")
+    renamed = s.ensure(unnamed.id, "桂枝汤治什么？", user_id="u1")
+    assert renamed.title == "桂枝汤治什么？"
+
+
+def test_ensure_placeholder_with_history_uses_first_user_question(store):
+    s, _ = store
+    conv = s.create("新对话", user_id="u1")
+    s.add_message(conv.id, "user", "四君子汤有什么功效？")
+    s.add_message(conv.id, "assistant", "补气健脾")
+    out = s.ensure(conv.id, "那用量呢？", user_id="u1")
+    assert out.title == "四君子汤有什么功效？"
+
+
+def test_ensure_keeps_custom_title(store):
+    s, _ = store
+    conv = s.create("我的会话", user_id="u1")
+    out = s.ensure(conv.id, "人参补气吗？", user_id="u1")
+    assert out.title == "我的会话"
+
+
 def test_search_and_batch_delete(store):
     s, _ = store
     a = s.create("四君子汤")

@@ -120,15 +120,10 @@ def _build_prompt(state: GraphState, schema_meta: dict) -> str:
 # ============================================================
 
 
-def create_llm():
-    from langchain_openai import ChatOpenAI
-    return ChatOpenAI(
-        model=os.getenv("MODEL_NAME", "deepseek-chat"),
-        api_key=os.getenv("MODEL_API_KEY"),
-        base_url=os.getenv("MODEL_BASE_URL"),
-        temperature=0,
-        max_tokens=512,  # 限制输出长度，Cypher 生成不需超长输出
-    )
+def create_llm(provider: str | None = None):
+    from common.llm import get_chat_model
+
+    return get_chat_model(provider, max_tokens=512)
 
 
 # ============================================================
@@ -248,7 +243,7 @@ def make_cypher_generation_node(llm):
 
 
 def cypher_generation_node(state: GraphState) -> dict[str, Any]:
-    return make_cypher_generation_node(create_llm())(state)
+    return make_cypher_generation_node(create_llm(state.get("llm_provider")))(state)
 
 
 # ============================================================

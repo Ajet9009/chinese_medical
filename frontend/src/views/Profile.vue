@@ -1,7 +1,12 @@
 <template>
-  <div class="admin-page">
-    <h2>账号</h2>
-    <p class="hint admin-lead">查看当前身份，并修改登录密码。密码至少 6 位。</p>
+  <div class="page admin-page">
+    <div class="page-inner">
+    <header class="page-head">
+      <div>
+        <h2>账号</h2>
+        <p class="hint">查看身份并修改密码，至少 6 位。</p>
+      </div>
+    </header>
     <section class="card profile-card">
       <p><strong>{{ info.username || auth.username }}</strong>
         <span class="muted"> · {{ roleLabel }}</span>
@@ -36,6 +41,7 @@
       <p v-if="deptOk" class="hint">{{ deptOk }}</p>
       <p v-if="error" class="err">{{ error }}</p>
     </section>
+    </div>
   </div>
 </template>
 

@@ -1,0 +1,402 @@
+[
+  {
+    "id": "shanghanlun",
+    "title": "伤寒论",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "傷寒論",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "jinguiyaolue",
+    "title": "金匮要略",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "金匱要略",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "wenbingtiaobian-juan1",
+    "title": "温病条辨·卷一",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "溫病條辨/卷一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "suwen-siku-juan01",
+    "title": "黄帝内经素问·卷01",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "黄帝内經素問 (四庫全書本)/卷01",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "lingshu-siku-juan01",
+    "title": "灵枢经·卷01",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "靈樞經 (四庫全書本)/卷01",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "nanjing",
+    "title": "难经",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "難經",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "maijing-juan01",
+    "title": "脉经·卷01",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "脈經/卷01",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "zhouhoubeijifang",
+    "title": "肘后备急方",
+    "docType": "典籍",
+    "source": "wikisource",
+    "page": "肘後備急方",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "suwen-shanggu-ctext",
+    "title": "黄帝内经素问·上古天真论",
+    "docType": "典籍",
+    "source": "ctext",
+    "urn": "ctp:huangdi-neijing/shang-gu-tian-zhen-lun",
+    "license": "原文公有领域；中国哲学书电子化计划公开章节"
+  },
+  {
+    "id": "shanghanlun-pingmai-ctext",
+    "title": "伤寒论·平脉法",
+    "docType": "典籍",
+    "source": "ctext",
+    "urn": "ctp:shang-han-lun/ping-mai-fa",
+    "license": "原文公有领域；中国哲学书电子化计划公开章节"
+  },
+  {
+    "id": "bencaogangmu-xu",
+    "title": "本草纲目·序",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/序",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "shennongbencaojing",
+    "title": "神农本草经",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "神農本草經",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-cao1",
+    "title": "本草纲目·草之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/草之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-cai1",
+    "title": "本草纲目·菜之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/菜之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-gu1",
+    "title": "本草纲目·谷之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/穀之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-jinshi1",
+    "title": "本草纲目·金石之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/金石之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-guo1",
+    "title": "本草纲目·果之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/果之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-mu1",
+    "title": "本草纲目·木之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/木之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-chong1",
+    "title": "本草纲目·虫之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/蟲之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "bencaogangmu-qin1",
+    "title": "本草纲目·禽之一",
+    "docType": "本草",
+    "source": "wikisource",
+    "page": "本草綱目/禽之一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "qianjin-xu",
+    "title": "备急千金要方·序",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "備急千金要方/序",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "qianjin-juan1",
+    "title": "备急千金要方·第一",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "備急千金要方/第一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "qianjin-juan2",
+    "title": "备急千金要方·第二",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "備急千金要方/第二",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "qianjin-juan3",
+    "title": "备急千金要方·第三",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "備急千金要方/第三",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "qianjin-juan4",
+    "title": "备急千金要方·第四",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "備急千金要方/第四",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "hejijufang-siku-juan1",
+    "title": "太平惠民和剂局方·卷1",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "太平惠民和劑局方 (四庫全書本)/卷1",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "hejijufang-siku-juan2",
+    "title": "太平惠民和剂局方·卷2",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "太平惠民和劑局方 (四庫全書本)/卷2",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "jufangfahui",
+    "title": "局方发挥",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "局方發揮",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "tangtou-fabiao",
+    "title": "汤头歌诀·发表之剂",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "湯頭歌訣/發表之劑",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "tangtou-buyi",
+    "title": "汤头歌诀·补益之剂",
+    "docType": "方剂",
+    "source": "wikisource",
+    "page": "湯頭歌訣/補益之劑",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "linzheng-juan1",
+    "title": "临证指南医案·卷一",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "臨證指南醫案/卷一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "linzheng-juan2",
+    "title": "临证指南医案·卷二",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "臨證指南醫案/卷二",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "linzheng-juan3",
+    "title": "临证指南医案·卷三",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "臨證指南醫案/卷三",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "linzheng-juan4",
+    "title": "临证指南医案·卷四",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "臨證指南醫案/卷四",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "yuyicao",
+    "title": "寓意草",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "寓意草",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "mingyileian-siku-juan01",
+    "title": "名医类案·卷01",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "名醫類案 (四庫全書本)/卷01",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "xumingyileian-siku-juan03",
+    "title": "续名医类案·卷03",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "續名醫類案 (四庫全書本)/卷03",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "xumingyileian-siku-juan20",
+    "title": "续名医类案·卷20",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "續名醫類案 (四庫全書本)/卷20",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "xueshiyian-siku-juan35",
+    "title": "薛氏医案·卷35",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "薛氏醫案 (四庫全書本)/卷35",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "xueshiyian-siku-juan34",
+    "title": "薛氏医案·卷34",
+    "docType": "医案",
+    "source": "wikisource",
+    "page": "薛氏醫案 (四庫全書本)/卷34",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "zhenjiujiayijing",
+    "title": "针灸甲乙经",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "針灸甲乙經",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "shisijingfahui",
+    "title": "十四经发挥",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "十四經發揮",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "piweilun-shang",
+    "title": "脾胃论·卷上",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "脾胃論/卷上",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "gezhiyulun",
+    "title": "格致余论",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "格致餘論",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "lanshimicang",
+    "title": "兰室秘藏",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "蘭室秘藏",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "suwenxuanjiyuanbingshi",
+    "title": "素问玄机原病式",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "素問玄機原病式",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "zhenjiudacheng-juan1",
+    "title": "针灸大成·卷一",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "針灸大成/卷一",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "leijing-siku-juan01",
+    "title": "类经·卷01",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "類經 (四庫全書本)/卷01",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "shiwenbingtiao",
+    "title": "湿热条辨",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "濕熱條辨",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  },
+  {
+    "id": "piweilun-zhong",
+    "title": "脾胃论·卷中",
+    "docType": "其他",
+    "source": "wikisource",
+    "page": "脾胃論/卷中",
+    "license": "原文公有领域；维基文库整理 CC BY-SA 4.0"
+  }
+]

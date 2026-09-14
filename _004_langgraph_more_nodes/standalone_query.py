@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from common.env_loader import load_app_env
+from common.langfuse_manager import fetch_prompt
 
 try:
     from .state import GraphState, history_as_text
@@ -22,16 +22,10 @@ _STANDALONE_FALLBACK = """你是中医问答系统的指代消解器。
 只输出改写后的问题，不要解释、不要引号。"""
 
 
-def create_llm():
-    from langchain_openai import ChatOpenAI
+def create_llm(provider: str | None = None):
+    from common.llm import get_chat_model
 
-    return ChatOpenAI(
-        model=os.getenv("MODEL_NAME", "deepseek-chat"),
-        api_key=os.getenv("MODEL_API_KEY"),
-        base_url=os.getenv("MODEL_BASE_URL"),
-        temperature=0,
-        streaming=False,
-    )
+    return get_chat_model(provider, streaming=False)
 
 
 def make_standalone_query_node(llm):
@@ -53,7 +47,7 @@ def make_standalone_query_node(llm):
 请输出独立问句。"""
         try:
             raw = str(llm.invoke([
-                SystemMessage(content=_STANDALONE_FALLBACK),
+                SystemMessage(content=fetch_prompt("standalone_query", _STANDALONE_FALLBACK)),
                 HumanMessage(content=prompt),
             ]).content).strip()
         except Exception:
@@ -73,4 +67,4 @@ def standalone_query_node(state: GraphState) -> dict[str, Any]:
         raise ValueError("state.user_question 不能为空")
     if not (state.get("messages") or []):
         return {"search_question": question}
-    return make_standalone_query_node(create_llm())(state)
+    return make_standalone_query_node(create_llm(state.get("llm_provider")))(state)

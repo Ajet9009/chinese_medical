@@ -116,6 +116,7 @@ flowchart TB
 | 长期记忆 | `_008_memory`：Redis 短期 + 向量三元组 + 画像；失败降级不挡问答 |
 | ACL | `knowledge_acl.py` 文档级科室/角色 |
 | Prompt | Langfuse 拉取，失败本地 fallback |
+| 运行日志 | `common/app_logging.py`：stderr + `data/logs/app.log`（50MB×10）；`/ask` 记 `start/done/error/interrupted` |
 
 ---
 
@@ -143,7 +144,7 @@ flowchart TB
 | API | FastAPI + Uvicorn SSE |
 | 前端 | Vue 3 + Vite + Pinia + Vue Router |
 | 会话 | SQLite + Redis |
-| 可观测 | Langfuse + 内存 degraded |
+| 可观测 | Langfuse + 内存 degraded + `data/logs/app.log` |
 | Python | conda 环境名 **grid-qa**（不要建 `venv/`） |
 
 遗留：`_006_streamlit`、`_007_fine_tune`（vLLM LoRA）不是主路径。
@@ -154,7 +155,7 @@ flowchart TB
 
 ```
 _000_demo/                  验证脚本
-_001_crawler/               中药/方剂爬取
+_001_crawler/               图谱百科爬取 + 知识库公开典籍
 _002_extract_information/   抽三元组
 _003_create_neo4j_database/ 入库 + 实体 FAISS
 _004_langgraph_more_nodes/  图节点（含 doc_retrieval）

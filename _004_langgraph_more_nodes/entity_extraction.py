@@ -96,16 +96,10 @@ def _get_extraction_prompt() -> str:
 # ============================================================
 
 
-def create_llm():
-    """创建项目通用的 OpenAI 兼容 LLM。"""
-    from langchain_openai import ChatOpenAI
+def create_llm(provider: str | None = None):
+    from common.llm import get_chat_model
 
-    return ChatOpenAI(
-        model=os.getenv("MODEL_NAME", "deepseek-chat"),
-        api_key=os.getenv("MODEL_API_KEY"),
-        base_url=os.getenv("MODEL_BASE_URL"),
-        temperature=0,
-    )
+    return get_chat_model(provider)
 
 
 # ============================================================
@@ -196,7 +190,7 @@ def make_entity_extraction_node(llm):
 
 def entity_extraction_node(state: GraphState) -> dict[str, Any]:
     """默认节点（首次调用时惰性初始化 LLM）。"""
-    return make_entity_extraction_node(create_llm())(state)
+    return make_entity_extraction_node(create_llm(state.get("llm_provider")))(state)
 
 
 # ============================================================

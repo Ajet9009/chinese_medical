@@ -168,6 +168,24 @@ def test_reset_password_and_logs(auth_client):
     assert "登录" in types
     assert "用户管理" in types
     assert logs["total"] >= 1
+    assert "登录" in logs["operate_types"]
+
+    login_only = c.get("/admin/logs", params={"operate_type": "登录"}, headers=h).json()
+    assert login_only["total"] >= 1
+    assert all(x["operate_type"] == "登录" for x in login_only["items"])
+
+    admin_only = c.get("/admin/logs", params={"username": "admin"}, headers=h).json()
+    assert admin_only["total"] >= 1
+    assert all("admin" in x["username"] for x in admin_only["items"])
+
+    bad = c.get("/admin/logs", params={"start": "not-a-date"}, headers=h)
+    assert bad.status_code == 400
+    inverted = c.get(
+        "/admin/logs",
+        params={"start": "2026-09-10", "end": "2026-09-01"},
+        headers=h,
+    )
+    assert inverted.status_code == 400
 
 
 def test_admin_upload_doc_rebuilds_index(auth_client, tmp_path, monkeypatch):

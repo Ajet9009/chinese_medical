@@ -23,11 +23,25 @@ logger = logging.getLogger("conversation_store")
 _REDIS_KEY = "cm:conv:{conv_id}:msgs"
 
 
+_PLACEHOLDER_TITLES = frozenset({"", "新对话", "未命名"})
+
+
 def title_from_question(question: str, max_len: int = 20) -> str:
     text = " ".join(question.strip().split())
     if len(text) <= max_len:
         return text or "新对话"
     return text[:max_len] + "…"
+
+
+def is_placeholder_title_step_01(title: str | None) -> bool:
+    """步骤：01 判断标题是否仍是占位名，供 ensure 在首条提问时改成问题摘要。
+
+    参数:
+        title: 当前会话标题，空视为占位。
+    返回:
+        是否为「新对话 / 未命名 / 空」这类尚未按问题命名的标题。
+    """
+    return (title or "").strip() in _PLACEHOLDER_TITLES
 
 
 def _utcnow() -> str:
@@ -481,6 +495,29 @@ class ConversationStore:
         self._conn.commit()
         self._redis_delete(conv_id)
 
+    def _message_count_step_02(self, conv_id: str) -> int:
+        """步骤：02 统计会话消息条数。由 ensure 判断是否首条提问时调用。"""
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ?",
+            (conv_id,),
+        ).fetchone()
+        return int(row["n"] if row is not None else 0)
+
+    def _first_user_question_step_03(self, conv_id: str) -> str:
+        """步骤：03 取该会话第一条用户消息。由 ensure 给存量占位会话命名时调用。"""
+        row = self._conn.execute(
+            """
+            SELECT content FROM messages
+            WHERE conversation_id = ? AND role = 'user'
+            ORDER BY created_at ASC
+            LIMIT 1
+            """,
+            (conv_id,),
+        ).fetchone()
+        if row is None:
+            return ""
+        return str(row["content"] or "")
+
     def ensure(
         self,
         conv_id: str | None,
@@ -488,11 +525,42 @@ class ConversationStore:
         user_id: str = "",
         is_admin: bool = False,
     ) -> Conversation:
+        """步骤：01 取已有会话或按首问新建；占位标题只在尚未命名时改成问题摘要。
+
+        对齐 grid-qa：点「新对话」可不预建库；已有「新对话」占位且还没有消息时，
+        第一次提问再命名。存量占位会话若已有历史，用第一条用户问题命名，不用当前追问。
+        手工改过的标题保持不变。
+
+        参数:
+            conv_id: 已有会话 id，空则新建。
+            first_question: 当前用户问题，空会话时用于生成标题。
+            user_id / is_admin: 可见性校验，与 get/rename 一致。
+        返回:
+            可用的 Conversation。
+        异常:
+            KeyError: conv_id 存在但会话不可见或不存在。
+        """
         if conv_id:
             conv = self.get(conv_id, user_id=user_id, is_admin=is_admin)
             if conv is None:
                 raise KeyError(conv_id)
-            return conv
+            if not is_placeholder_title_step_01(conv.title):
+                return conv
+            n = self._message_count_step_02(conv.id)
+            if n == 0:
+                title = title_from_question(first_question)
+            else:
+                title = title_from_question(
+                    self._first_user_question_step_03(conv.id) or first_question
+                )
+            if title == conv.title:
+                return conv
+            return self.rename(
+                conv.id,
+                title,
+                user_id=user_id,
+                is_admin=is_admin,
+            )
         return self.create(title=title_from_question(first_question), user_id=user_id)
 
     def add_message(

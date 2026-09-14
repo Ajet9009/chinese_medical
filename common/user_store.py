@@ -9,6 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from common.env_loader import load_app_env
 from common.security import hash_password, verify_password
@@ -18,6 +19,34 @@ logger = logging.getLogger("user_store")
 
 def _utcnow() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def parse_log_datetime(raw: str | None, *, end: bool = False) -> datetime | None:
+    """解析查询时间。仅日期或无时区时按东八区；end 的日期取当天最后一刻。"""
+    text = (raw or "").strip()
+    if not text:
+        return None
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        text = f"{text}T23:59:59.999999" if end else f"{text}T00:00:00"
+    try:
+        dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("时间格式无效") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_SHANGHAI)
+    return dt.astimezone(timezone.utc)
+
+
+def parse_log_bound(raw: str | None, *, end: bool = False) -> str | None:
+    dt = parse_log_datetime(raw, end=end)
+    return dt.isoformat() if dt else None
 
 
 @dataclass
@@ -226,12 +255,62 @@ class UserStore:
         )
         self._conn.commit()
 
-    def list_logs(self, limit: int = 50, offset: int = 0) -> dict:
-        total = int(self._conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()[0])
+    def _log_filters(
+        self,
+        username: str = "",
+        operate_type: str = "",
+        start: str = "",
+        end: str = "",
+    ) -> tuple[str, list[str]]:
+        clauses: list[str] = []
+        args: list[str] = []
+        name = (username or "").strip()
+        if name:
+            clauses.append("username LIKE ? ESCAPE '\\'")
+            args.append(f"%{_like_escape(name)}%")
+        kind = (operate_type or "").strip()
+        if kind:
+            clauses.append("operate_type = ?")
+            args.append(kind)
+        start_dt = parse_log_datetime(start, end=False)
+        end_dt = parse_log_datetime(end, end=True)
+        if start_dt and end_dt and start_dt > end_dt:
+            raise ValueError("开始时间不能晚于结束时间")
+        if start_dt:
+            clauses.append("created_at >= ?")
+            args.append(start_dt.isoformat())
+        if end_dt:
+            clauses.append("created_at <= ?")
+            args.append(end_dt.isoformat())
+        where = " AND ".join(clauses)
+        return where, args
+
+    def list_logs(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        username: str = "",
+        operate_type: str = "",
+        start: str = "",
+        end: str = "",
+    ) -> dict:
+        where, args = self._log_filters(username, operate_type, start, end)
+        sql_where = f"WHERE {where}" if where else ""
+        total = int(
+            self._conn.execute(
+                f"SELECT COUNT(*) FROM audit_logs {sql_where}", args
+            ).fetchone()[0]
+        )
         rows = self._conn.execute(
-            "SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (max(1, min(limit, 200)), max(0, offset)),
+            f"SELECT * FROM audit_logs {sql_where} ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            (*args, max(1, min(int(limit), 200)), max(0, int(offset))),
         ).fetchall()
+        types = [
+            r[0]
+            for r in self._conn.execute(
+                "SELECT DISTINCT operate_type FROM audit_logs ORDER BY operate_type"
+            ).fetchall()
+        ]
         return {
             "total": total,
             "items": [
@@ -244,6 +323,7 @@ class UserStore:
                 }
                 for r in rows
             ],
+            "operate_types": types,
         }
 
 

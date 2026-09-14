@@ -18,12 +18,6 @@ from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Any, Literal, AsyncGenerator
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-    datefmt="%H:%M:%S",
-)
-
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
@@ -31,11 +25,12 @@ if ROOT not in sys.path:
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from _005_fastapi.deps import get_current_user, get_users, require_admin
 from _005_fastapi.knowledge import router as knowledge_router
 from _005_fastapi.sse import is_answer_token_event, token_text_from_event
+from common.app_logging import log_ask, setup_logging
 from common.conversation_store import ConversationStore, Message, default_store
 from common.context_compressor import compress_history
 from common.env_loader import load_app_env
@@ -106,6 +101,7 @@ def _init_memory(app: FastAPI) -> None:
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    setup_logging()
     app.state.langfuse_mgr = LangfuseManager()
     app.state.memory_mgr = None
     secret = os.getenv("JWT_SECRET") or ""
@@ -154,11 +150,18 @@ app.include_router(knowledge_router)
 
 
 class AskRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     question: str = Field(..., min_length=1, max_length=500, description="用户问题")
     conversation_id: str | None = Field(default=None, description="会话 id，空则新建")
     omit_user_message: bool = Field(
         default=False,
         description="重新生成/编辑后重提：不再写入一条用户消息",
+    )
+    model_type: str = Field(
+        default="",
+        max_length=32,
+        description="deepseek | qwen | doubao，空则用 MODEL_* 默认模型",
     )
 
 
@@ -177,6 +180,8 @@ class DocChunkOut(BaseModel):
 
 
 class AskResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     question: str
     intent: str
     intent_reason: str = ""
@@ -197,6 +202,7 @@ class AskResponse(BaseModel):
     conversation_id: str = ""
     search_question: str = ""
     trace_id: str = ""
+    model_type: str = ""
 
 
 class FeedbackRequest(BaseModel):
@@ -340,11 +346,13 @@ def _build_response(
         if isinstance(d, dict)
     ]
 
+    zhongyi = bool(final_state.get("is_zhongyi_intent"))
+    intent = str(final_state.get("intent") or ("tcm" if zhongyi else "general"))
     return AskResponse(
         question=question,
-        intent=final_state.get("intent", "general"),
+        intent=intent,
         intent_reason=final_state.get("intent_reason", ""),
-        is_zhongyi_intent=final_state.get("is_zhongyi_intent", False),
+        is_zhongyi_intent=zhongyi,
         user_entities=user_entities,
         matched_entities=matched,
         cypher_queries=final_state.get("cypher_queries", []) or [],
@@ -361,6 +369,7 @@ def _build_response(
         conversation_id=conversation_id,
         search_question=final_state.get("search_question", "") or "",
         trace_id=trace_id,
+        model_type=str(final_state.get("llm_provider") or ""),
     )
 
 
@@ -381,6 +390,7 @@ def _assistant_details(resp: AskResponse) -> dict[str, Any]:
         "crag_action": resp.crag_action,
         "crag_confidence": resp.crag_confidence,
         "citation_ok": resp.citation_ok,
+        "model_type": resp.model_type,
     }
 
 
@@ -446,12 +456,14 @@ def _initial_state(
     history: list[dict[str, str]],
     viewer_dept: str = "",
     viewer_role: str = "user",
+    llm_provider: str = "",
 ) -> dict[str, Any]:
     return {
         "user_question": question,
         "messages": history,
         "viewer_dept": viewer_dept,
         "viewer_role": viewer_role,
+        "llm_provider": llm_provider,
     }
 
 
@@ -461,14 +473,17 @@ def _make_handler(
     session_id: str,
     user_id: str = "anonymous",
     force: bool = False,
+    request_id: str | None = None,
+    llm_provider: str = "",
 ):
     mgr: LangfuseManager = request.app.state.langfuse_mgr
     if not mgr.is_enabled():
         return None
     metadata = {
-        "request_id": str(uuid.uuid4()),
+        "request_id": request_id or str(uuid.uuid4()),
         "session_id": session_id,
         "user_id": user_id,
+        "model_type": llm_provider or "default",
     }
     return mgr.create_handler(trace_name=trace_name, metadata=metadata, force=force)
 
@@ -506,13 +521,16 @@ def _write_memory(
 
 def _force_sample_summary(
     request: Request, trace_name: str, reason: str, summary: dict[str, Any],
-    session_id: str = "", user_id: str = "anonymous",
+    session_id: str = "", user_id: str = "anonymous", request_id: str = "",
 ) -> None:
     """异常/重试/低分时，即使未命中采样也强制记录摘要 trace。"""
     mgr: LangfuseManager = request.app.state.langfuse_mgr
+    metadata: dict[str, Any] = {"session_id": session_id, "user_id": user_id}
+    if request_id:
+        metadata["request_id"] = request_id
     mgr.record_summary_span(
         trace_name=trace_name,
-        metadata={"session_id": session_id, "user_id": user_id},
+        metadata=metadata,
         summary={"reason": reason, **summary},
     )
 
@@ -539,13 +557,14 @@ def _post_turn(
     handler,
     final_state: dict,
     elapsed: float,
+    request_id: str = "",
 ) -> AskResponse:
     reason = _check_force_sample(final_state, elapsed)
     if reason:
         _force_sample_summary(
             request, trace_name, reason,
             {"question": payload.question, "elapsed_ms": elapsed},
-            session_id=conv_id, user_id=user.id,
+            session_id=conv_id, user_id=user.id, request_id=request_id,
         )
     if handler is not None:
         get_eval_manager().score_auto(handler.trace_id, final_state)
@@ -574,6 +593,22 @@ def health(request: Request):
         "degraded": obs_snapshot(),
         "memory": memory,
     }
+
+
+@app.get("/llm/providers")
+def llm_providers(_user: User = Depends(get_current_user)):
+    from common.llm import list_llm_providers
+
+    return {"items": list_llm_providers()}
+
+
+def _llm_provider_or_400(model_type: str) -> str:
+    from common.llm import resolve_llm
+
+    try:
+        return resolve_llm(model_type).id
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def _admin_user_out(u: User) -> AdminUserOut:
@@ -767,34 +802,101 @@ def delete_favorite(favorite_id: str, user: User = Depends(get_current_user)):
 @app.post("/ask", response_model=AskResponse)
 def ask(payload: AskRequest, request: Request, user: User = Depends(get_current_user)) -> AskResponse:
     t0 = time.time()
+    rid = str(uuid.uuid4())
+    llm_provider = _llm_provider_or_400(payload.model_type)
     conv_id, history = _prepare_turn(payload, user)
-    handler = _make_handler(request, "POST:/ask", conv_id, user.id)
-    config = {"callbacks": [handler]} if handler else None
-    question = _read_memory(request, user.id, conv_id, payload.question)
-    initial = _initial_state(
-        question,
-        history,
-        viewer_dept=getattr(user, "dept", "") or "",
-        viewer_role=user.role,
+    log_ask(
+        "start",
+        request_id=rid,
+        conv_id=conv_id,
+        user=user.username,
+        question=payload.question,
+        path="ask",
+        model=llm_provider or "default",
     )
     try:
-        graph = get_graph()
-        final_state = graph.invoke(initial, config=config) if config else graph.invoke(initial)
-    except Exception as exc:
-        _force_sample_summary(
-            request, "POST:/ask", "exception",
-            {"error": str(exc), "question": payload.question},
-            session_id=conv_id, user_id=user.id,
+        handler = _make_handler(
+            request, "POST:/ask", conv_id, user.id, request_id=rid, llm_provider=llm_provider,
         )
-        raise HTTPException(status_code=500, detail=f"图执行失败: {exc}")
-    elapsed = (time.time() - t0) * 1000
-    return _post_turn(request, "POST:/ask", payload, user, conv_id, handler, final_state, elapsed)
+        config = {"callbacks": [handler]} if handler else None
+        question = _read_memory(request, user.id, conv_id, payload.question)
+        initial = _initial_state(
+            question,
+            history,
+            viewer_dept=getattr(user, "dept", "") or "",
+            viewer_role=user.role,
+            llm_provider=llm_provider,
+        )
+        try:
+            graph = get_graph()
+            final_state = graph.invoke(initial, config=config) if config else graph.invoke(initial)
+        except Exception as exc:
+            log_ask(
+                "error",
+                request_id=rid,
+                conv_id=conv_id,
+                user=user.username,
+                question=payload.question,
+                path="ask",
+                err=type(exc).__name__,
+                elapsed_ms=round((time.time() - t0) * 1000, 1),
+            )
+            _force_sample_summary(
+                request, "POST:/ask", "exception",
+                {"error": str(exc), "question": payload.question},
+                session_id=conv_id, user_id=user.id, request_id=rid,
+            )
+            raise HTTPException(status_code=500, detail=f"图执行失败: {exc}") from exc
+        elapsed = (time.time() - t0) * 1000
+        resp = _post_turn(
+            request, "POST:/ask", payload, user, conv_id, handler, final_state, elapsed,
+            request_id=rid,
+        )
+        log_ask(
+            "done",
+            request_id=rid,
+            conv_id=conv_id,
+            user=user.username,
+            question=payload.question,
+            path="ask",
+            elapsed_ms=round(elapsed, 1),
+            intent=resp.intent,
+        )
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log_ask(
+            "error",
+            request_id=rid,
+            conv_id=conv_id,
+            user=user.username,
+            question=payload.question,
+            path="ask",
+            err=type(exc).__name__,
+            elapsed_ms=round((time.time() - t0) * 1000, 1),
+        )
+        raise
 
 
 @app.post("/ask/stream")
 async def ask_stream(payload: AskRequest, request: Request, user: User = Depends(get_current_user)):
+    t0 = time.time()
+    rid = str(uuid.uuid4())
+    llm_provider = _llm_provider_or_400(payload.model_type)
     conv_id, history = _prepare_turn(payload, user)
-    handler = _make_handler(request, "POST:/ask/stream", conv_id, user.id)
+    log_ask(
+        "start",
+        request_id=rid,
+        conv_id=conv_id,
+        user=user.username,
+        question=payload.question,
+        path="ask/stream",
+        model=llm_provider or "default",
+    )
+    handler = _make_handler(
+        request, "POST:/ask/stream", conv_id, user.id, request_id=rid, llm_provider=llm_provider,
+    )
     config = {"callbacks": [handler]} if handler else None
     question = _read_memory(request, user.id, conv_id, payload.question)
     initial = _initial_state(
@@ -802,12 +904,13 @@ async def ask_stream(payload: AskRequest, request: Request, user: User = Depends
         history,
         viewer_dept=getattr(user, "dept", "") or "",
         viewer_role=user.role,
+        llm_provider=llm_provider,
     )
 
     async def event_stream() -> AsyncGenerator[str, None]:
-        t0 = time.time()
         queue: asyncio.Queue = asyncio.Queue()
-        yield _sse("session", {"conversation_id": conv_id})
+        outcome = "running"
+        producer_task: asyncio.Task | None = None
 
         async def producer() -> None:
             try:
@@ -825,17 +928,29 @@ async def ask_stream(payload: AskRequest, request: Request, user: User = Depends
             finally:
                 await queue.put(("end", None))
 
-        producer_task = asyncio.create_task(producer())
         try:
+            yield _sse("session", {"conversation_id": conv_id, "request_id": rid})
+            producer_task = asyncio.create_task(producer())
             while True:
                 msg_type, item = await queue.get()
                 if msg_type == "end":
                     break
                 if msg_type == "error":
+                    outcome = "error"
+                    log_ask(
+                        "error",
+                        request_id=rid,
+                        conv_id=conv_id,
+                        user=user.username,
+                        question=payload.question,
+                        path="ask/stream",
+                        err=type(item).__name__,
+                        elapsed_ms=round((time.time() - t0) * 1000, 1),
+                    )
                     _force_sample_summary(
                         request, "POST:/ask/stream", "exception",
                         {"error": str(item), "question": payload.question},
-                        session_id=conv_id, user_id=user.id,
+                        session_id=conv_id, user_id=user.id, request_id=rid,
                     )
                     yield _sse("error", {"error": str(item)})
                     break
@@ -884,18 +999,61 @@ async def ask_stream(payload: AskRequest, request: Request, user: User = Depends
                     resp = _post_turn(
                         request, "POST:/ask/stream", payload, user,
                         conv_id, handler, final_state, elapsed,
+                        request_id=rid,
+                    )
+                    outcome = "done"
+                    log_ask(
+                        "done",
+                        request_id=rid,
+                        conv_id=conv_id,
+                        user=user.username,
+                        question=payload.question,
+                        path="ask/stream",
+                        elapsed_ms=round(elapsed, 1),
+                        intent=resp.intent,
                     )
                     yield _sse("done", resp.model_dump())
+        except (GeneratorExit, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            if outcome == "running":
+                outcome = "error"
+                log_ask(
+                    "error",
+                    request_id=rid,
+                    conv_id=conv_id,
+                    user=user.username,
+                    question=payload.question,
+                    path="ask/stream",
+                    err=type(exc).__name__,
+                    elapsed_ms=round((time.time() - t0) * 1000, 1),
+                )
+            raise
         finally:
-            await producer_task
+            if outcome == "running":
+                log_ask(
+                    "interrupted",
+                    request_id=rid,
+                    conv_id=conv_id,
+                    user=user.username,
+                    question=payload.question,
+                    path="ask/stream",
+                    elapsed_ms=round((time.time() - t0) * 1000, 1),
+                )
+            if producer_task is not None:
+                try:
+                    await producer_task
+                except asyncio.CancelledError:
+                    pass
 
     return StreamingResponse(
         event_stream(),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "Content-Encoding": "identity",
         },
     )
 
@@ -925,6 +1083,8 @@ _PROMPT_CATALOG = [
     ("answer_generation", "图谱回答"),
     ("general_response", "通用回答"),
     ("context_compress", "对话摘要"),
+    ("standalone_query", "指代消解"),
+    ("crag_rewrite", "文献查询改写"),
 ]
 
 
@@ -1178,8 +1338,26 @@ def admin_reset_password(
 
 
 @app.get("/admin/logs")
-def admin_list_logs(limit: int = 50, offset: int = 0, user: User = Depends(require_admin)):
-    return get_users().list_logs(limit=limit, offset=offset)
+def admin_list_logs(
+    limit: int = 50,
+    offset: int = 0,
+    username: str = "",
+    operate_type: str = "",
+    start: str = "",
+    end: str = "",
+    user: User = Depends(require_admin),
+):
+    try:
+        return get_users().list_logs(
+            limit=limit,
+            offset=offset,
+            username=username,
+            operate_type=operate_type,
+            start=start,
+            end=end,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def main():

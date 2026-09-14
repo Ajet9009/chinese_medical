@@ -224,6 +224,23 @@ class _TraceCallbackHandler:
             return str(type(obj))
 
 
+def make_langfuse_client():
+    """创建 Langfuse SDK 客户端。
+
+    本机 `localhost` Langfuse 走系统 HTTP 代理会 502，因此 httpx 关闭 trust_env。
+    """
+    import httpx
+    import langfuse
+
+    timeout = int(os.getenv("LANGFUSE_TIMEOUT", "20"))
+    return langfuse.Langfuse(
+        secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
+        public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
+        host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+        httpx_client=httpx.Client(timeout=timeout, trust_env=False),
+    )
+
+
 class LangfuseManager:
     """Langfuse 客户端管理器。
 
@@ -249,11 +266,7 @@ class LangfuseManager:
                     )
                     self._enabled = False
                 else:
-                    self._client = langfuse.Langfuse(
-                        secret_key=os.getenv("LANGFUSE_SECRET_KEY", ""),
-                        public_key=os.getenv("LANGFUSE_PUBLIC_KEY", ""),
-                        host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
-                    )
+                    self._client = make_langfuse_client()
                     logger.info("Langfuse 客户端已初始化 (host=%s)", os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"))
             except ImportError as exc:
                 from common.obs import degraded
