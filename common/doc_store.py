@@ -18,6 +18,7 @@ from rank_bm25 import BM25Okapi
 
 from common.doc_chunking import build_document_chunks_step_04
 from common.env_loader import load_app_env
+from common.query_expansion import expand_zhongyi_query_step_01
 from common.rag.mmr import mmr
 from common.rag.rrf import rrf_fuse
 
@@ -35,6 +36,87 @@ def _tokenize(text: str) -> tuple[str, ...]:
 
 def _chunk_key(hit: dict[str, Any]) -> str:
     return f"{hit.get('doc_id', '')}#{hit.get('chunk_idx', 0)}"
+
+
+def _chunk_search_blob_step_01(chunk: dict[str, Any]) -> str:
+    """步骤 01：合并子块正文、父块标题和繁简字段，供稀疏检索与规则重排使用。"""
+    fields: list[str] = []
+    for key in (
+        "text",
+        "text_simplified",
+        "text_traditional",
+        "title",
+        "parent_title",
+        "title_simplified",
+        "title_traditional",
+        "doc_name",
+        "doc_type",
+    ):
+        value = chunk.get(key)
+        if value:
+            fields.append(str(value))
+    for item in chunk.get("section_path") or []:
+        if item:
+            fields.append(str(item))
+
+    out: list[str] = []
+    seen: set[str] = set()
+    for field in fields:
+        clean = field.strip()
+        if clean and clean not in seen:
+            seen.add(clean)
+            out.append(clean)
+    return "\n".join(out)
+
+
+def _query_terms_step_02(question: str) -> list[str]:
+    """步骤 02：把原问句扩展为可用于短语和分词命中的检索词。"""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for variant in expand_zhongyi_query_step_01(question):
+        for term in (variant, *_tokenize(variant)):
+            clean = str(term or "").strip()
+            if clean and clean not in seen:
+                seen.add(clean)
+                terms.append(clean)
+    return terms
+
+
+def rule_rerank_hits_step_03(question: str, hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """步骤 03：按标题短语、正文短语和 token 覆盖给召回结果做轻量规则重排。"""
+    terms = _query_terms_step_02(question)
+    if not terms:
+        return list(hits)
+
+    ranked: list[dict[str, Any]] = []
+    for rank, hit in enumerate(hits):
+        item = dict(hit)
+        title_blob = "\n".join(
+            str(item.get(key) or "")
+            for key in ("title", "parent_title", "title_simplified", "title_traditional", "doc_name")
+        )
+        search_blob = _chunk_search_blob_step_01(item)
+        title_hits = sum(1 for term in terms if len(term) >= 2 and term in title_blob)
+        body_hits = sum(1 for term in terms if len(term) >= 2 and term in search_blob)
+        base_score = float(item.get("score") or 0.0)
+        rule_score = min(0.28, title_hits * 0.12 + body_hits * 0.03)
+        item["base_score"] = base_score
+        item["rule_score"] = round(rule_score, 6)
+        item["rerank_score"] = round(base_score + rule_score, 6)
+        item["score"] = min(1.0, item["rerank_score"])
+        item["_rule_rank"] = rank
+        ranked.append(item)
+
+    ranked.sort(
+        key=lambda x: (
+            -float(x.get("rerank_score") or 0.0),
+            -float(x.get("rule_score") or 0.0),
+            int(x.get("_rule_rank") or 0),
+        )
+    )
+    for item in ranked:
+        item.pop("_rule_rank", None)
+    return ranked
 
 
 def _bge_encode(model_path: str) -> EncodeFn:
@@ -109,11 +191,13 @@ class FaissDocStore:
         return self
 
     def _rebuild_bm25(self) -> None:
-        texts = [str(c.get("text") or "") for c in self.chunks]
+        """步骤 01：用正文和结构化 metadata 重建 BM25 倒排语料。"""
+        texts = [_chunk_search_blob_step_01(c) for c in self.chunks]
         self._tokenized = [list(_tokenize(t)) for t in texts]
         self._bm25 = BM25Okapi(self._tokenized) if self._tokenized else None
 
     def search_bm25(self, question: str, top_k: int = 20) -> list[dict[str, Any]]:
+        """步骤 02：用 query 扩展后的繁简变体执行 BM25 与短语兜底检索。"""
         q = (question or "").strip()
         if not q:
             return []
@@ -127,11 +211,20 @@ class FaissDocStore:
                 self._rebuild_bm25()
         if self._bm25 is None:
             return []
-        scores = np.asarray(self._bm25.get_scores(list(_tokenize(q))), dtype="float64")
+        variants = expand_zhongyi_query_step_01(q) or [q]
+        score_sets = [
+            np.asarray(self._bm25.get_scores(list(_tokenize(variant))), dtype="float64")
+            for variant in variants
+            if list(_tokenize(variant))
+        ]
+        scores = np.maximum.reduce(score_sets) if score_sets else np.zeros(len(self.chunks))
         if scores.size and float(scores.max()) <= 0:
-            qset = set(_tokenize(q))
+            terms = set(_query_terms_step_02(q))
             scores = np.asarray(
-                [float(len(qset & set(tok))) for tok in self._tokenized],
+                [
+                    float(sum(1 for term in terms if len(term) >= 2 and term in _chunk_search_blob_step_01(chunk)))
+                    for chunk in self.chunks
+                ],
                 dtype="float64",
             )
         ranked = sorted(enumerate(scores), key=lambda x: -x[1])[: max(1, top_k)]
@@ -145,6 +238,7 @@ class FaissDocStore:
         return hits
 
     def mixed_search(self, question: str, top_k: int = 4, min_score: float = 0.0) -> list[dict[str, Any]]:
+        """步骤 03：融合 dense/BM25 后执行规则重排和 MMR 多样性筛选。"""
         q = (question or "").strip()
         if not q:
             return []
@@ -165,6 +259,7 @@ class FaissDocStore:
                 hit["score"] = dense_scores[key]
             elif key in sparse_keys:
                 hit["score"] = 0.45
+        fused = rule_rerank_hits_step_03(q, fused)
         mmr_on = os.getenv("MMR_ENABLE", "1").strip().lower() not in ("0", "false", "no")
         lam = float(os.getenv("MMR_LAMBDA", "0.5"))
         if mmr_on and len(fused) > top_k:

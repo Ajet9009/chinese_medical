@@ -241,6 +241,71 @@ def test_bm25_ranks_term_match(tmp_path):
     assert hits[0]["doc_name"] == "四君子汤.md"
 
 
+def test_bm25_matches_simplified_query_against_traditional_metadata(tmp_path):
+    from common.doc_store import FaissDocStore
+
+    store = FaissDocStore(
+        index_path=tmp_path / "docs.index",
+        metadata_path=tmp_path / "docs.json",
+        encode_fn=_encode,
+    )
+    store.build_chunks(
+        [
+            {
+                "doc_id": "mahuang",
+                "doc_name": "麻黃湯.md",
+                "chunk_idx": 0,
+                "parent_title": "麻黃湯",
+                "title_simplified": "麻黄汤",
+                "text": "麻黃湯 發汗解表。",
+                "text_simplified": "麻黄汤 发汗解表。",
+            },
+            {
+                "doc_id": "other",
+                "doc_name": "桂枝湯.md",
+                "chunk_idx": 0,
+                "parent_title": "桂枝湯",
+                "title_simplified": "桂枝汤",
+                "text": "桂枝湯 解肌發表。",
+                "text_simplified": "桂枝汤 解肌发表。",
+            },
+        ]
+    )
+
+    hits = store.search_bm25("麻黄汤主治", top_k=2)
+
+    assert hits
+    assert hits[0]["doc_name"] == "麻黃湯.md"
+
+
+def test_rule_rerank_prefers_parent_title_exact_match():
+    from common.doc_store import rule_rerank_hits_step_03
+
+    hits = [
+        {
+            "doc_id": "body",
+            "doc_name": "麻黄散.md",
+            "chunk_idx": 0,
+            "text": "麻黄用于发汗，另有条文主治喘咳。",
+            "score": 0.80,
+        },
+        {
+            "doc_id": "title",
+            "doc_name": "麻黃湯.md",
+            "chunk_idx": 0,
+            "parent_title": "麻黃湯",
+            "title_simplified": "麻黄汤",
+            "text": "發汗解表。",
+            "score": 0.70,
+        },
+    ]
+
+    ranked = rule_rerank_hits_step_03("麻黄汤主治", hits)
+
+    assert ranked[0]["doc_id"] == "title"
+    assert ranked[0]["rule_score"] > ranked[1]["rule_score"]
+
+
 def test_mixed_search_fuses_dense_and_bm25(tmp_path):
     from common.doc_store import FaissDocStore
 
