@@ -17,7 +17,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from common.doc_rag import REFUSE_ANSWER, chunk_text
+from common.doc_rag import REFUSE_ANSWER
 from common.env_loader import load_app_env
 from common.eval_golden import keyword_hit_ratio, load_golden
 
@@ -194,6 +194,7 @@ def doc_title_step_09(body: str, fallback: str) -> str:
 
 def load_corpus_chunks_step_10(source_dir: Path | None = None) -> list[dict[str, Any]]:
     """步骤 10：按文献入库规则切块，供嵌入生成参考上下文。"""
+    from common.doc_chunking import build_document_chunks_step_04
     from common.doc_store import default_source_dir, read_document
 
     folder = Path(source_dir) if source_dir is not None else default_source_dir()
@@ -209,18 +210,19 @@ def load_corpus_chunks_step_10(source_dir: Path | None = None) -> list[dict[str,
     chunks: list[dict[str, Any]] = []
     for path in files:
         body = read_document(path)
-        title = doc_title_step_09(body, path.stem)
-        parts = chunk_text(body, size=size, overlap=overlap)
-        for i, part in enumerate(parts):
-            chunks.append(
-                {
-                    "doc_id": path.stem,
-                    "doc_name": path.name,
-                    "chunk_idx": i,
-                    "text": part,
-                    "title": title,
-                }
-            )
+        doc_type = path.parent.name if path.parent != folder else ""
+        built = build_document_chunks_step_04(
+            doc_id=path.stem,
+            doc_name=path.name,
+            body=body,
+            doc_type=doc_type,
+            size=size,
+            overlap=overlap,
+        )
+        fallback_title = doc_title_step_09(body, path.stem)
+        for item in built:
+            item["title"] = item.get("title") or fallback_title
+        chunks.extend(built)
     return chunks
 
 

@@ -16,7 +16,7 @@ import jieba
 import numpy as np
 from rank_bm25 import BM25Okapi
 
-from common.doc_rag import chunk_text
+from common.doc_chunking import build_document_chunks_step_04
 from common.env_loader import load_app_env
 from common.rag.mmr import mmr
 from common.rag.rrf import rrf_fuse
@@ -230,6 +230,7 @@ def read_document(path: Path) -> str:
 
 
 def ingest_directory(source_dir: Path | None = None, store: FaissDocStore | None = None) -> int:
+    """步骤 01：读取文献目录并用结构化父子分块重建文献索引。"""
     folder = Path(source_dir) if source_dir else default_source_dir()
     if not folder.is_dir():
         raise FileNotFoundError(f"文献目录不存在: {folder}")
@@ -241,17 +242,18 @@ def ingest_directory(source_dir: Path | None = None, store: FaissDocStore | None
     chunks: list[dict[str, Any]] = []
     for path in files:
         body = read_document(path)
-        parts = chunk_text(body, size=size, overlap=overlap)
         doc_id = path.stem
-        for i, part in enumerate(parts):
-            chunks.append(
-                {
-                    "doc_id": doc_id,
-                    "doc_name": path.name,
-                    "chunk_idx": i,
-                    "text": part,
-                }
+        doc_type = path.parent.name if path.parent != folder else ""
+        chunks.extend(
+            build_document_chunks_step_04(
+                doc_id=doc_id,
+                doc_name=path.name,
+                body=body,
+                doc_type=doc_type,
+                size=size,
+                overlap=overlap,
             )
+        )
     if not chunks:
         raise ValueError("目录中没有可分块的文本")
     if store is None:
