@@ -1,108 +1,56 @@
 [
   {
-    "query": "四君子汤有什么功效？",
-    "expect": [
-      "益气",
-      "健脾"
-    ],
+    "query": "麻黃湯治什麼？",
+    "expect": ["寒傷營", "無汗"],
     "category": "方剂",
     "source": "seed",
-    "relevant_docs": [
-      "sijunzi.md"
-    ]
+    "relevant_docs": ["fangji_tangtou.md"]
   },
   {
-    "query": "四君子汤由哪些药组成？",
-    "expect": [
-      "人参",
-      "白术",
-      "茯苓",
-      "甘草"
-    ],
+    "query": "桂枝湯治風傷衛有汗嗎？",
+    "expect": ["風傷衛", "有汗"],
     "category": "方剂",
     "source": "seed",
-    "relevant_docs": [
-      "sijunzi.md"
-    ]
+    "relevant_docs": ["fangji_tangtou.md"]
   },
   {
-    "query": "人参常见于哪些方剂？",
-    "expect": [
-      "人参"
-    ],
+    "query": "人參味如何、主補什麼？",
+    "expect": ["味甘小寒", "補五臟"],
     "category": "本草",
-    "source": "seed"
-  },
-  {
-    "query": "黄芪有什么功效？",
-    "expect": [
-      "黄芪"
-    ],
-    "category": "本草",
-    "source": "seed"
-  },
-  {
-    "query": "小柴胡汤主治什么？",
-    "expect": [
-      "少阳",
-      "往来寒热"
-    ],
-    "category": "文献",
     "source": "seed",
-    "relevant_docs": [
-      "xiaochaihu.md"
-    ]
+    "relevant_docs": ["bencao_shennong.md"]
   },
   {
-    "query": "小柴胡汤的组成有哪些？",
-    "expect": [
-      "柴胡",
-      "黄芩"
-    ],
-    "category": "文献",
-    "source": "seed",
-    "relevant_docs": [
-      "xiaochaihu.md"
-    ]
-  },
-  {
-    "query": "往来寒热属于什么证？",
-    "expect": [
-      "少阳"
-    ],
+    "query": "少陽之為病有哪些提綱證？",
+    "expect": ["口苦", "咽乾", "目眩"],
     "category": "证候",
     "source": "seed",
-    "relevant_docs": [
-      "xiaochaihu.md"
-    ]
+    "relevant_docs": ["dianji_shanghanlun.md"]
   },
   {
-    "query": "什么是少阳证？",
-    "expect": [
-      "少阳"
-    ],
-    "category": "证候",
+    "query": "太陽病轉入少陽、往來寒熱當與何方？",
+    "expect": ["往來寒熱", "小柴胡湯"],
+    "category": "典籍",
     "source": "seed",
-    "relevant_docs": [
-      "xiaochaihu.md"
-    ]
+    "relevant_docs": ["dianji_shanghanlun.md"]
   },
   {
-    "query": "桂枝汤和四君子汤有什么不同？",
-    "expect": [
-      "桂枝汤"
-    ],
-    "category": "文献",
+    "query": "土衰不生金氣、建中之後接服何方？",
+    "expect": ["土衰不生金氣", "四君子湯"],
+    "category": "医案",
     "source": "seed",
-    "relevant_docs": [
-      "xiaochaihu.md"
-    ]
+    "relevant_docs": ["yian_linzheng.md"]
+  },
+  {
+    "query": "脾胃俱旺則能食而如何？",
+    "expect": ["脾胃俱旺", "能食而肥"],
+    "category": "其他",
+    "source": "seed",
+    "relevant_docs": ["qita_piweilun.md"]
   },
   {
     "query": "今天上证指数多少？",
-    "expect": [
-      "未查到"
-    ],
+    "expect": ["未查到"],
     "category": "拒答",
     "source": "seed"
   }

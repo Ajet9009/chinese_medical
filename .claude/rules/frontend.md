@@ -1,0 +1,11 @@
+---
+paths:
+  - "frontend/**"
+---
+
+# Vue 前端
+
+- 主应用是 `frontend/`（Vite，开发端口 **5174**）。
+- 状态用 Pinia；请求走 `frontend/src/api.js`。问答用 `POST /ask/stream` SSE，不要改回非流式当默认。
+- 鉴权：JWT；未登录不要调 `/ask`。角色只有 `user` / `admin`，不开放自行注册。
+- 页面：Chat / Documents / KnowledgeGovernance / Admin / Profile。管理与治理能力不要做进 Chat。

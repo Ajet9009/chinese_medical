@@ -27,6 +27,8 @@ def test_repo_golden_validates():
     queries = [str(it["query"]).strip() for it in items]
     assert len(queries) == len(set(queries))
     assert any(it.get("category") == "拒答" for it in items)
+    cats = {str(it.get("category") or "") for it in items}
+    assert {"方剂", "本草", "证候", "典籍", "医案", "其他", "拒答"} <= cats
     assert all(it.get("category") != "变电" for it in items)
 
 

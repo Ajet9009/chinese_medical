@@ -1,0 +1,14 @@
+---
+description: LangGraph 九节点、双 FAISS 与文献 CRAG 约定
+globs: "_004_langgraph_more_nodes/**,common/rag/**,common/doc_*.py,common/doc_store.py,common/doc_rag.py,common/context_compressor.py"
+alwaysApply: false
+---
+
+# LangGraph / 文献 RAG
+
+- 改节点或边只动 `graph.py`，不要在手册或注释里另画一套拓扑。
+- 检索问句用 `question_for_retrieval`（优先 `search_question`）。
+- 中医路径：抽取 → 归一（实体 FAISS）→ Cypher → 执行 → `doc_retrieval`（文献 FAISS + CRAG）→ `answer_generation`。
+- 非中医：`doc_retrieval` 命中文献则生成，否则 `general_response`。闲聊路径不要为 CRAG 多打一次改写 LLM。
+- 图谱空且文献不可用则拒答（`doc_rag.should_refuse`），不要编造方剂。
+- 文献检索走 `doc_store` / `DOC_FAISS_*`；实体对齐走 `FAISS_INDEX_PATH`。两套索引禁止混读。

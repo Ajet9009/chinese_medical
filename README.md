@@ -13,6 +13,7 @@
 | 本 README | 开发：架构、配置、API、测试 |
 | [`docs/系统架构.md`](docs/系统架构.md) | 代码级 mermaid（函数路径） |
 | [`使用手册.md`](使用手册.md) | 使用 / 管理 / 换设备 |
+| [`AGENTS.md`](AGENTS.md) / [`CLAUDE.md`](CLAUDE.md) | Cursor / Claude Code 入职手册 |
 
 ---
 
@@ -101,7 +102,7 @@ flowchart TB
 - `doc_rag.should_refuse`：图谱空且文献不可用 → 固定拒答句。
 - 弱证据可加「依据有限，仅供参考。」
 - 引用：`common/rag/cite.py` 重叠/相似度闸门（`CITATION_*`）。
-- 非中医意图：`general_response`，不跑 Cypher。
+- 非中医：先 `doc_retrieval`；有摘录走 `answer_generation`，否则 `general_response`。不跑 Cypher。
 
 ---
 
@@ -112,7 +113,7 @@ flowchart TB
 | 鉴权 | JWT，`deps.py`；登录限流 `login_limit` |
 | 降级 | `common/obs.py::degraded`，永不抛；`/health` 与系统运行状态 |
 | 追踪 | Langfuse Trace/Span/Generation；失败不影响问答 |
-| 评测 | `eval/golden_qa.json` + `scripts/eval_golden.py`；反馈标入黄金集；`eval_manager` 自动评分 |
+| 评测 | `eval/golden_qa.json` + `scripts/eval_golden.py`；`corpus/` 公版摘录 + `scripts/eval_ragas.py all` 填五列；`official` 才调 ragas 包；指标英文（中文） |
 | 长期记忆 | `_008_memory`：Redis 短期 + 向量三元组 + 画像；失败降级不挡问答 |
 | ACL | `knowledge_acl.py` 文档级科室/角色 |
 | Prompt | Langfuse 拉取，失败本地 fallback |
@@ -130,6 +131,8 @@ flowchart TB
 | SQLite | 会话、用户、收藏、`kb_*` 登记与治理 |
 | Redis | 近期消息 List，LTRIM 条数 |
 | `eval/golden_qa.json` | 黄金集（不放 `data/`，该目录 gitignore） |
+| `eval/ragas_testset.json` | RAGAS 内部题库 |
+| `eval/ragas_dataset.json` | RAGAS `EvaluationDataset`（五列 JSON 数组） |
 | `data/` | 运行时库与上传原件，**不进 git** |
 
 ---
@@ -147,29 +150,27 @@ flowchart TB
 | 可观测 | Langfuse + 内存 degraded + `data/logs/app.log` |
 | Python | conda 环境名 **grid-qa**（不要建 `venv/`） |
 
-遗留：`_006_streamlit`、`_007_fine_tune`（vLLM LoRA）不是主路径。
-
 ---
 
 ## 九、目录结构
 
 ```
-_000_demo/                  验证脚本
 _001_crawler/               图谱百科爬取 + 知识库公开典籍
 _002_extract_information/   抽三元组
 _003_create_neo4j_database/ 入库 + 实体 FAISS
 _004_langgraph_more_nodes/  图节点（含 doc_retrieval）
 _005_fastapi/               main.py + knowledge.py
-_006_streamlit/             遗留前端
-_007_fine_tune/             LoRA 客户端
 _008_memory/                长期记忆（三元组/画像，失败降级）
 frontend/                   Vue 主前端 :5174
 common/                     会话、压缩器、RAG、知识库、obs、黄金集
-corpus/                     演示文献
+corpus/                     评测摘录（kb_crawl 公版原文，繁体为主）
 eval/golden_qa.json         黄金集
+eval/ragas_testset.json     RAGAS 内部题库
+eval/ragas_dataset.json     RAGAS EvaluationDataset 五列
 docs/系统架构.md            代码级 mermaid
 使用手册.md                 操作与换设备
 scripts/eval_golden.py
+scripts/eval_ragas.py
 docker-compose.yml          仅 Redis
 tests/
 ```
@@ -228,6 +229,7 @@ npm --prefix frontend run dev       # http://localhost:5174
 | POST | `/admin/feedbacks/{id}/golden` | 标入黄金集 |
 | GET | `/admin/import-status` | 系统运行状态数据 |
 | GET | `/admin/golden` | 黄金集摘要 |
+| GET | `/admin/ragas` | RAGAS 指标目录与最近报告 |
 
 `/ask` 需登录。curl 示例：
 
@@ -248,11 +250,37 @@ curl -X POST http://127.0.0.1:8000/ask \
 ```bash
 pytest tests/ -q
 python scripts/eval_golden.py          # 校验黄金集，不调 LLM
+python scripts/eval_ragas.py all       # 按切块出题并填满五列，不调 LLM
+python scripts/eval_ragas.py official  # 调 ragas.evaluate（需 requirements-eval.txt + MODEL_*）
 ```
 
-黄金集类别：方剂 / 本草 / 证候 / 文献 / 拒答。`source=feedback` 允许空 `expect`（待标注，评分跳过）。通过标准：已标注条目的期望关键词全部出现在答案里。
+黄金集类别：方剂 / 本草 / 证候 / 典籍 / 医案 / 其他 / 拒答（另保留「文献」兼容旧条）。`source=feedback` 允许空 `expect`（待标注，评分跳过）。通过标准：已标注条目的期望关键词全部出现在答案里。`expect` 必须是 `corpus/` 切块里的**原文字串**（摘录是繁体就写繁体，不能用简体去对繁体块）。
 
-管理页「评测」只读列表；「反馈 → 标为黄金集」写入 `eval/golden_qa.json`。
+`corpus/` 五篇从本机 `data/kb_crawl` **按段原样摘录**（`scripts/excerpt_eval_corpus.py`），不改写医理：方剂 `fangji_tangtou.md`、本草 `bencao_shennong.md`、典籍 `dianji_shanghanlun.md`、医案 `yian_linzheng.md`、其他 `qita_piweilun.md`（映射知识库类型「其他」）。`data/kb_crawl` 本身 gitignore，不能当评测语料入库。
+
+文献 RAG 评测用同一套 BGE（无模型时回退字符哈希）：先按问句嵌入从 `corpus/` 选出 `reference_contexts`，再跑混合检索（FAISS+BM25+RRF+MMR，可选 CRAG）。默认答案为检索块抽取拼接；`--live` 才打 `/ask`。
+
+会写出两份文件：
+
+| 文件 | 用途 |
+|---|---|
+| `eval/ragas_testset.json` | 生成器用的内部题库（含 category / expect） |
+| `eval/ragas_dataset.json` | **RAGAS `EvaluationDataset.from_list` 数组**：`user_input`、`retrieved_contexts`、`response`、`reference`、`reference_contexts` |
+
+`all`（generate+run）填满检索列与答案。`official` 才 `pip install -r requirements-eval.txt` 后调用 `ragas.evaluate()`（LLM 用 `MODEL_*` 的 ChatOpenAI，嵌入用本机 BGE）。安装时钉住 `langgraph>=1.2.10`，不要为 ragas 降级问答主路径。抽取式答案上 Faithfulness（忠实度）会偏高，这是接好流水线的预期；生成质量请加 `--live` 再 `official`。
+
+选用指标（英文（中文））：
+
+| 指标 | 作用 |
+|---|---|
+| Faithfulness（忠实度） | 答案是否能由检索上下文支持 |
+| Answer Relevancy（答案相关性） | 是否在回答该问题 |
+| Context Precision（上下文精确度） | 检索块里相关比例 |
+| Context Recall（上下文召回度） | 参考上下文是否被召回 |
+| Answer Correctness（答案正确性） | 相对参考/期望关键词 |
+| Answer Semantic Similarity（答案语义相似度） | 答案与参考的嵌入余弦 |
+
+跳过 Noise Sensitivity 等强依赖 LLM-as-judge 的项。管理页「评测」展示黄金集与最近一次 RAGAS 得分；「反馈 → 标为黄金集」写入 `eval/golden_qa.json`。
 
 ---
 

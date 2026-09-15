@@ -18,6 +18,7 @@ venv/
 *.pt
 *.ckpt
 data/
+eval/ragas_report.json
 *.db
 *.sqlite
 
@@ -49,5 +50,9 @@ Thumbs.db
 .idea/
 .vscode/
 *.lnk
+.codex/
 .cursor/mcp.json
 .claude/settings.local.json
+
+# Agent 本机便签（盘符、Neo4j 启动路径）；项目共识在 AGENTS.md
+CLAUDE.local.md

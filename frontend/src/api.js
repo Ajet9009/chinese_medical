@@ -115,6 +115,10 @@ export function adminGolden() {
   return json("/admin/golden");
 }
 
+export function adminRagas_step_01() {
+  return json("/admin/ragas");
+}
+
 export function adminPrompts() {
   return json("/admin/prompts");
 }

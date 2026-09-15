@@ -192,7 +192,8 @@
 
     <section v-else-if="current === 'eval'" class="card">
       <p class="hint" style="margin-top:0">
-        离线关键词命中，不跑线上 LLM。CI：<code>python scripts/eval_golden.py</code>。反馈点踩后标入待标注，不是旁路评测子系统。
+        黄金集：离线关键词全命中，CI <code>python scripts/eval_golden.py</code>。
+        文献 RAG：嵌入生成评测集后写出 RAGAS dataset（五列 JSON）并打分，CI <code>python scripts/eval_ragas.py</code>（默认不调 LLM）。
       </p>
       <p class="hint">
         共 {{ golden.total || 0 }} 条 · 已标注 {{ golden.labeled || 0 }} · 待标注 {{ golden.pending || 0 }}
@@ -219,6 +220,32 @@
           </tr>
           <tr v-if="!(golden.items || []).length">
             <td colspan="4" class="hint">黄金集为空</td>
+          </tr>
+        </tbody>
+      </table>
+      <h3 style="margin-top:1.5rem">RAGAS 文献 RAG</h3>
+      <p class="hint">
+        评测集 {{ ragas.testset?.n_items || 0 }} 条
+        · dataset {{ ragas.dataset?.n_items || 0 }} 条
+        （{{ (ragas.dataset?.columns || []).join(" / ") || "user_input / retrieved_contexts / response / reference / reference_contexts" }}）
+        <span v-if="ragas.report">
+          · 最近 {{ ragas.report.n_samples || 0 }} 条 · {{ ragas.report.answer_mode || "extractive" }}
+        </span>
+        <span v-else> · 尚无报告，本机运行脚本后刷新</span>
+      </p>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>指标 English（中文）</th>
+            <th>含义</th>
+            <th>得分</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in ragasRows" :key="row.id">
+            <td>{{ row.name }}</td>
+            <td class="clip">{{ row.why }}</td>
+            <td>{{ row.score == null ? "—" : Number(row.score).toFixed(3) }}</td>
           </tr>
         </tbody>
       </table>
@@ -414,6 +441,7 @@ import {
   adminFeedbacks,
   adminGolden,
   adminImportStatus,
+  adminRagas_step_01,
   adminIngestDocs,
   adminLogs,
   adminMarkGolden,
@@ -443,6 +471,16 @@ const importStatus = ref({});
 const ingestBusy = ref(false);
 const ingestMsg = ref("");
 const golden = ref({ total: 0, labeled: 0, pending: 0, items: [] });
+const ragas = ref({ metrics: [], testset: {}, dataset: { columns: [] }, report: null });
+const ragasRows = computed(() => {
+  const scores = Object.fromEntries(
+    (ragas.value.report?.metrics || []).map((m) => [m.id, m.score]),
+  );
+  return (ragas.value.metrics || []).map((m) => ({
+    ...m,
+    score: scores[m.id],
+  }));
+});
 const goldenBusy = ref("");
 const goldenHint = ref("");
 const users = ref([]);
@@ -538,6 +576,10 @@ async function loadGolden() {
   golden.value = await adminGolden();
 }
 
+async function loadRagas_step_01() {
+  ragas.value = await adminRagas_step_01();
+}
+
 async function markGolden(item) {
   goldenHint.value = "";
   goldenBusy.value = item.message_id;
@@ -583,6 +625,7 @@ async function loadAll() {
     prompts.value = await adminPrompts();
     importStatus.value = await adminImportStatus();
     await loadGolden();
+    await loadRagas_step_01();
     await loadUsers();
     await loadLogs();
   } catch (e) {

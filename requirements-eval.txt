@@ -1,0 +1,9 @@
+# 官方 ragas.evaluate 可选依赖。问答主路径不要装进 requirements.txt。
+# 安装时钉住 langgraph / langchain-core，禁止为 ragas 降级。
+#
+#   pip install -r requirements-eval.txt
+#
+ragas>=0.2.14
+langgraph>=1.2.10
+langchain-core>=1.5.3
+langchain>=1.3.14

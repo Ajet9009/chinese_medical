@@ -1122,6 +1122,14 @@ def admin_golden(_admin: User = Depends(require_admin)):
     return summary
 
 
+@app.get("/admin/ragas")
+def admin_ragas(_admin: User = Depends(require_admin)):
+    """步骤：01 返回 RAGAS 指标目录（英文（中文））与最近一次嵌入评测报告。"""
+    from common.eval_ragas import summary_for_admin_step_23
+
+    return summary_for_admin_step_23()
+
+
 @app.post("/admin/feedbacks/{message_id}/golden")
 def admin_mark_golden(message_id: str, user: User = Depends(require_admin)):
     from common.eval_golden import add_from_feedback

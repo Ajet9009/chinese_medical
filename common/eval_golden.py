@@ -13,7 +13,9 @@ from typing import Any
 
 from common.env_loader import load_app_env
 
-CATEGORIES = frozenset({"方剂", "本草", "证候", "文献", "拒答", "用户反馈"})
+CATEGORIES = frozenset(
+    {"方剂", "本草", "证候", "文献", "典籍", "医案", "其他", "拒答", "用户反馈"}
+)
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

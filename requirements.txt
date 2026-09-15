@@ -15,10 +15,12 @@ requests
 httpx
 redis
 pytest
-streamlit
 jieba
 rank-bm25
 python-multipart
 pypdf
 PyJWT
 bcrypt
+
+# 官方 ragas.evaluate 为可选：pip install -r requirements-eval.txt
+# 必须同时钉住 langgraph>=1.2.10，勿让 ragas 降级问答主路径。

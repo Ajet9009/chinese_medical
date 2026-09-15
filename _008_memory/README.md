@@ -49,9 +49,8 @@ get_context
   └─ Redis 近期对话 + Token 预算压缩
 ```
 
-## 演示 / 测试
+## 测试
 
 ```bash
-python _000_demo/demo_memory.py
 python -m unittest tests.test_memory_isolation -v
 ```
