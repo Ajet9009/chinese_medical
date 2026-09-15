@@ -408,7 +408,9 @@ class KnowledgeService:
         return {"successList": ok, "failList": fail}
 
     def rebuild_index(self) -> int:
-        from common.doc_store import FaissDocStore, default_doc_paths, reset_doc_store
+        """步骤 01：按文献向量后端配置重建索引。"""
+        from common.doc_store import default_doc_paths, reset_doc_store
+        from common.doc_vector_backend import create_doc_store_step_02
 
         rows = self._conn.execute(
             """
@@ -434,7 +436,7 @@ class KnowledgeService:
             for r in rows
         ]
         index, meta = default_doc_paths()
-        store = FaissDocStore(index, meta, encode_fn=self._encode_fn)
+        store = create_doc_store_step_02(index_path=index, metadata_path=meta, encode_fn=self._encode_fn)
         store.build_chunks(chunks)
         reset_doc_store()
         return len(chunks)

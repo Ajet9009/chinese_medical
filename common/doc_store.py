@@ -370,8 +370,9 @@ def ingest_directory(source_dir: Path | None = None, store: FaissDocStore | None
     if not chunks:
         raise ValueError("目录中没有可分块的文本")
     if store is None:
-        index, meta = default_doc_paths()
-        store = FaissDocStore(index, meta)
+        from common.doc_vector_backend import create_doc_store_step_02
+
+        store = create_doc_store_step_02()
     store.build_chunks(chunks)
     return len(chunks)
 
@@ -380,14 +381,17 @@ _store: FaissDocStore | None = None
 
 
 def get_doc_store() -> FaissDocStore | None:
+    """步骤 01：按配置加载文献向量库后端。"""
     global _store
     if _store is not None:
         return _store
+    from common.doc_vector_backend import create_doc_store_step_02, doc_vector_backend_name_step_01
+
     index, meta = default_doc_paths()
-    if not index.is_file() or not meta.is_file():
+    if doc_vector_backend_name_step_01() == "faiss" and (not index.is_file() or not meta.is_file()):
         return None
     try:
-        _store = FaissDocStore(index, meta).load()
+        _store = create_doc_store_step_02(index_path=index, metadata_path=meta).load()
     except Exception as exc:
         from common.obs import degraded
 
