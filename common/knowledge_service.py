@@ -14,7 +14,7 @@ from typing import Any, Callable
 
 import numpy as np
 
-from common.doc_rag import chunk_text
+from common.doc_chunking import build_document_chunks_step_04
 from common.env_loader import load_app_env
 from common.knowledge_acl import acl_ok
 from common.knowledge_governance import (
@@ -81,6 +81,7 @@ class KnowledgeService:
         self._conn.close()
 
     def _ensure_schema(self) -> None:
+        """步骤 01：创建知识库表，并补齐旧库缺失的 chunk metadata 列。"""
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS kb_documents (
@@ -156,7 +157,28 @@ class KnowledgeService:
             );
             """
         )
+        self._ensure_chunk_metadata_columns_step_02()
         self._conn.commit()
+
+    def _ensure_chunk_metadata_columns_step_02(self) -> None:
+        """步骤 02：为旧版 kb_chunks 表追加父子分块 metadata 列。"""
+        existing = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(kb_chunks)").fetchall()
+        }
+        columns = {
+            "parent_id": "TEXT DEFAULT ''",
+            "parent_title": "TEXT DEFAULT ''",
+            "section_path": "TEXT DEFAULT '[]'",
+            "text_simplified": "TEXT DEFAULT ''",
+            "text_traditional": "TEXT DEFAULT ''",
+            "title_simplified": "TEXT DEFAULT ''",
+            "title_traditional": "TEXT DEFAULT ''",
+            "parent_text_preview": "TEXT DEFAULT ''",
+        }
+        for name, ddl in columns.items():
+            if name not in existing:
+                self._conn.execute(f"ALTER TABLE kb_chunks ADD COLUMN {name} {ddl}")
 
     def _doc_dir(self, doc_id: str) -> Path:
         path = self.docs_dir / doc_id
@@ -360,6 +382,7 @@ class KnowledgeService:
         }
 
     def parse(self, ids: list[str]) -> int:
+        """步骤 03：解析上传文档，并按章节父子分块写入 SQLite。"""
         n = 0
         size = int(os.getenv("DOC_CHUNK_SIZE", "400"))
         overlap = int(os.getenv("DOC_CHUNK_OVERLAP", "80"))
@@ -371,17 +394,43 @@ class KnowledgeService:
             from common.doc_store import read_document
 
             body = read_document(path) if path.suffix.lower() in {".pdf"} else path.read_text(encoding="utf-8", errors="ignore")
-            parts = chunk_text(body, size=size, overlap=overlap)
+            chunks = build_document_chunks_step_04(
+                doc_id=doc_id,
+                doc_name=row["doc_name"],
+                body=body,
+                doc_type=row["doc_type"],
+                size=size,
+                overlap=overlap,
+            )
             self._conn.execute("DELETE FROM kb_chunks WHERE doc_id=?", (doc_id,))
-            for i, part in enumerate(parts):
+            for item in chunks:
                 self._conn.execute(
-                    "INSERT INTO kb_chunks (id, doc_id, chunk_idx, text) VALUES (?, ?, ?, ?)",
-                    (uuid.uuid4().hex, doc_id, i, part),
+                    """
+                    INSERT INTO kb_chunks (
+                        id, doc_id, chunk_idx, text, parent_id, parent_title, section_path,
+                        text_simplified, text_traditional, title_simplified, title_traditional,
+                        parent_text_preview
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        doc_id,
+                        item["chunk_idx"],
+                        item["text"],
+                        item.get("parent_id") or "",
+                        item.get("parent_title") or "",
+                        json.dumps(item.get("section_path") or [], ensure_ascii=False),
+                        item.get("text_simplified") or "",
+                        item.get("text_traditional") or "",
+                        item.get("title_simplified") or "",
+                        item.get("title_traditional") or "",
+                        item.get("parent_text_preview") or "",
+                    ),
                 )
             tags = _herb_tags(body)
             self._conn.execute(
                 "UPDATE kb_documents SET status='parsed', chunk_count=?, herb_tags=? WHERE id=?",
-                (len(parts), tags, doc_id),
+                (len(chunks), tags, doc_id),
             )
             n += 1
         self._conn.commit()
@@ -414,7 +463,9 @@ class KnowledgeService:
 
         rows = self._conn.execute(
             """
-            SELECT c.doc_id, d.doc_name, c.chunk_idx, c.text, d.doc_type, d.dept, d.allowed_roles
+            SELECT c.doc_id, d.doc_name, c.chunk_idx, c.text, c.parent_id, c.parent_title,
+                   c.section_path, c.text_simplified, c.text_traditional, c.title_simplified,
+                   c.title_traditional, c.parent_text_preview, d.doc_type, d.dept, d.allowed_roles
             FROM kb_chunks c JOIN kb_documents d ON d.id = c.doc_id
             WHERE d.status = 'vectorized'
             ORDER BY c.doc_id, c.chunk_idx
@@ -429,6 +480,14 @@ class KnowledgeService:
                 "doc_name": r["doc_name"],
                 "chunk_idx": r["chunk_idx"],
                 "text": r["text"],
+                "parent_id": r["parent_id"] or "",
+                "parent_title": r["parent_title"] or "",
+                "section_path": json.loads(r["section_path"] or "[]"),
+                "text_simplified": r["text_simplified"] or "",
+                "text_traditional": r["text_traditional"] or "",
+                "title_simplified": r["title_simplified"] or "",
+                "title_traditional": r["title_traditional"] or "",
+                "parent_text_preview": r["parent_text_preview"] or "",
                 "doc_type": r["doc_type"],
                 "dept": r["dept"],
                 "allowed_roles": r["allowed_roles"],

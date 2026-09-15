@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 
@@ -57,6 +59,10 @@ def test_upload_list_parse_vectorize(tmp_path, monkeypatch):
     svc.vectorize(doc_id)
     vec = svc.get_document(doc_id)
     assert vec["status"] == "vectorized"
+    meta = json.loads((tmp_path / "docs.json").read_text(encoding="utf-8"))
+    assert meta[0]["parent_title"] == "四君子汤"
+    assert meta[0]["text_simplified"]
+    assert meta[0]["section_path"] == ["四君子汤"]
     hits = svc.search("四君子汤组成", viewer_dept="脾胃", viewer_role="user")
     assert hits
     assert hits[0]["doc_name"] == "四君子汤.md"
