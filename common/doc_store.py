@@ -119,6 +119,14 @@ def rule_rerank_hits_step_03(question: str, hits: list[dict[str, Any]]) -> list[
     return ranked
 
 
+def rerank_enabled_step_04() -> bool:
+    """步骤 04：判断是否启用可选 CrossEncoder reranker。"""
+    raw = os.getenv("DOC_RERANK_ENABLE")
+    if raw is None:
+        return bool((os.getenv("DOC_RERANK_MODEL_PATH") or "").strip())
+    return raw.strip().lower() not in ("0", "false", "no")
+
+
 def _bge_encode(model_path: str) -> EncodeFn:
     from sentence_transformers import SentenceTransformer
 
@@ -260,6 +268,16 @@ class FaissDocStore:
             elif key in sparse_keys:
                 hit["score"] = 0.45
         fused = rule_rerank_hits_step_03(q, fused)
+        if rerank_enabled_step_04() and len(fused) > 1:
+            try:
+                from common.rag.reranker import rerank_hits_step_02
+
+                fused = rerank_hits_step_02(q, fused)
+            except Exception as exc:
+                from common.obs import degraded
+
+                degraded("doc_reranker", exc)
+                logger.warning("文档 reranker 降级为规则重排: %s", exc)
         mmr_on = os.getenv("MMR_ENABLE", "1").strip().lower() not in ("0", "false", "no")
         lam = float(os.getenv("MMR_LAMBDA", "0.5"))
         if mmr_on and len(fused) > top_k:
